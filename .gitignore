@@ -1,0 +1,26 @@
+@"
+# RStudio cruft
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+
+# Build artifacts
+.Rproj
+.Rbuildignore
+
+# Outputs & caches (generated)
+outputs/
+outputs_cache/
+outputs/**
+
+# Large/raw inputs (don’t version big GDX)
+data-raw/gdx/
+
+# Big generated tables
+*.feather
+*.parquet
+*.fst
+*.rds
+"@ | Set-Content .gitignore -Encoding UTF8

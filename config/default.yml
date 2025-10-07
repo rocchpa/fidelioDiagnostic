@@ -1,0 +1,16 @@
+# paths:
+#   gdx_dir: "fidelio/gdx"
+#   outputs: "outputs"
+# scenarios: ["baseline"]
+# 
+# extract:
+#   include: []
+# 
+# derived:
+#   include: []
+# 
+# save:
+#   formats: ["csv"]
+# 
+# validate:
+#   rules: []
