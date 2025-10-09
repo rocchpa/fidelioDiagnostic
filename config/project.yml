@@ -1,45 +1,45 @@
-paths:
-  gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
-  outputs: "outputs"
-scenarios: ["baseline","ff55"]
-groups:
-  EU28: ["AUT","BEL","BGR","HRV","CYP","CZE","DNK","EST","FIN","FRA","DEU","GRC",
-         "HUN","IRL","ITA","LVA","LTU","LUX","MLT","NLD","POL","PRT","ROU","SVK",
-         "SVN","ESP","SWE","GBR"]
-extract:
-  include: ["GDPr_t","HSAVR_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
-            "Q_t","I_PP_t","P_I_t","K_t","L_t","U_t","P_CPI_t","ir_t",
-            "P_INPUT_t","P_Q_t","USE_PP_t","M_TOT_t","P_USE_t","P_Mcif_t",
-            "BITRADE_t","GHG_t"]
-aggregations:
-  additive_symbols:
-    ["GDPr_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
-     "Q_t","I_PP_t","K_t","L_t","U_t",
-     "USE_PP_t","M_TOT_t","BITRADE_t","GHG_t",
-     "P_USE_t","P_Mcif_t","P_I_t","P_Q_t","P_INPUT_t"]
-save:
-  formats: ["parquet", "feather"]  # per-symbol files; add "csv","fst","rds" if you like
-  # optional legacy single full bundle: bundle: false
-
-  # Multiple, selective bundles for different apps:
-  bundles:
-    diagnostic_app:
-      include: [
-        "GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t","GINV_VAL_t",
-        "TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t","ir_t","P_HH_CPI_t",
-        "I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t","P_KL_t","I_PP_SECT6_t",
-        "OUT_COMP6_SHARE_REAL_t",
-        "BITRADE_REG_t"
-      ]
-
-    results_app:
-      include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
-      # filters are applied symbol-by-symbol (keep/drop lists by column)
-      filters:
-        BITRADE_REG_t:
-          keep:
-            c: ["TOT"]    # keep only the commodity total rows
-      # also write ONE CSV that stacks these variables (plus an .rds bundle)
-      csv_combine: true
-      csv_basename: "results_bundle"   # writes results_bundle.csv in outdir
-      csv_shape: "wide"                # "wide" (baseline, ff55, delta, pct) or "long"
+  paths:
+    gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
+    outputs: "outputs"
+  scenarios: ["baseline","ff55"]
+  groups:
+    EU28: ["AUT","BEL","BGR","HRV","CYP","CZE","DNK","EST","FIN","FRA","DEU","GRC",
+           "HUN","IRL","ITA","LVA","LTU","LUX","MLT","NLD","POL","PRT","ROU","SVK",
+           "SVN","ESP","SWE","GBR"]
+  extract:
+    include: ["GDPr_t","HSAVR_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
+              "Q_t","I_PP_t","P_I_t","K_t","L_t","U_t","P_CPI_t","ir_t",
+              "P_INPUT_t","P_Q_t","USE_PP_t","M_TOT_t","P_USE_t","P_Mcif_t",
+              "BITRADE_t","GHG_t"]
+  aggregations:
+    additive_symbols:
+      ["GDPr_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
+       "Q_t","I_PP_t","K_t","L_t","U_t",
+       "USE_PP_t","M_TOT_t","BITRADE_t","GHG_t",
+       "P_USE_t","P_Mcif_t","P_I_t","P_Q_t","P_INPUT_t"]
+  save:
+    formats: ["parquet", "feather"]  # per-symbol files; add "csv","fst","rds" if you like
+    # optional legacy single full bundle: bundle: false
+  
+    # Multiple, selective bundles for different apps:
+    bundles:
+      diagnostic_app:
+        include: [
+          "GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t","GINV_VAL_t",
+          "TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t","ir_t","P_HH_CPI_t",
+          "I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t","P_KL_t","I_PP_SECT6_t",
+          "OUT_COMP6_SHARE_REAL_t",
+          "BITRADE_REG_t"
+        ]
+  
+      results_app:
+        include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+        # filters are applied symbol-by-symbol (keep/drop lists by column)
+        filters:
+          BITRADE_REG_t:
+            keep:
+              c: ["TOT"]    # keep only the commodity total rows
+        # also write ONE CSV that stacks these variables (plus an .rds bundle)
+        csv_combine: true
+        csv_basename: "results_bundle"   # writes results_bundle.csv in outdir
+        csv_shape: "wide"                # "wide" (baseline, ff55, delta, pct) or "long"

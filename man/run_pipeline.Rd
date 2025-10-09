@@ -2,10 +2,10 @@
 % Please edit documentation in R/pipeline.R
 \name{run_pipeline}
 \alias{run_pipeline}
-\title{Run the end-to-end pipeline: extract → wide → aggregates → deltas}
+\title{Run the end-to-end pipeline: extract → wide → aggregates → deltas → derived → save}
 \usage{
 run_pipeline(config = "config/project.yml")
 }
 \description{
-Run the end-to-end pipeline: extract → wide → aggregates → deltas
+Run the end-to-end pipeline: extract → wide → aggregates → deltas → derived → save
 }

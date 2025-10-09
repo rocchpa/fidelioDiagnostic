@@ -1,3 +1,7 @@
+# ==============================================================================
+# ====                          pipeline                                ========
+# ==============================================================================
+
 #' Run the end-to-end pipeline: extract → wide → aggregates → deltas → derived → save
 #' @export
 run_pipeline <- function(config = "config/project.yml") {

@@ -1,0 +1,783 @@
+---
+title: "fidelioDiagnostics — User Guide"
+output:
+  rmarkdown::html_vignette: default
+  pdf_document:
+    latex_engine: xelatex
+vignette: >
+  %\VignetteIndexEntry{fidelioDiagnostics — User Guide}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# 1. Scope
+
+**What the package does**
+- Extracts FIDELIO model outputs from **GDX** files.
+- Normalizes them into **wide** data tables (one column per scenario).
+- Computes **derived indicators** at three levels:
+  - nation (n, t)
+  - industry (n, i, t), including **6-sector aggregation**
+  - bilateral trade (n, n1, c, t), incl. regional totals
+- Saves results per symbol (Parquet/Feather/CSV/RDS) plus a **manifest** and optional **bundles**.
+- Ships two Shiny apps for exploration: **diagnostic** (internal) and **results** (shareable subset).
+
+**Data flow (overview)**
+```text
+GDX → extract_all() → results_by_symbol (wide)
+│
+├─ add macro-regions / sector groups
+├─ compute deltas & pct changes
+└─ derive_from_wide() → derived indicators
+│
+save_artifacts() → per-symbol files + manifest + bundles → Shiny apps
+```
+
+**Assumptions**
+- Scenarios are ordered; first = **baseline**, last = **policy** (e.g., `["baseline","ff55"]`).
+- Additive aggregations (e.g., totals by region/sector) are only applied to **absolute** measures.
+- Sector grouping uses generalized rules (A/B = primary; C* minus high-energy list = low-energy; D/E/F = utilities & construction; G..N = market services; O..U = public/personal), configurable in code.
+
+**Non-goals**
+- Running the FIDELIO model itself.
+- Editing GDX files.
+- Long-term data storage (outputs are regenerated each run).
+
+
+# 2. Package structure
+
+## 2.1 Folder map (what’s where)
+
+```text
+fidelioDiagnostic/
+├─ R/                     # package source code (functions)
+├─ config/                # YAML config (paths, scenarios, bundles, groups)
+├─ data-raw/              # raw inputs (e.g., GDX) — not versioned
+│  └─ gdx/                # your local GDX folders/files
+├─ outputs/               # generated results (per run) — not versioned
+│  ├─ base/               # optional: base-level saves (if used)
+│  └─ derived/            # derived indicators + manifest + bundles
+├─ inst/
+│  └─ app/                # Shiny apps (diagnostic/, results/)
+├─ vignettes/             # guides (this user guide, dev guide)
+├─ man/                   # auto-generated Rd docs (roxygen2)
+├─ tests/                 # unit tests (testthat)
+├─ DESCRIPTION, NAMESPACE # package metadata (do not edit NAMESPACE by hand)
+└─ README.Rmd / README.md # short front page
+```
+
+**Ignored by git (generated locally):** `outputs/`, `data-raw/gdx/`, `inst/doc/`, `doc/`, `Meta/`.
+
+---
+
+## 2.2 Key files you’ll touch
+
+| Path                   | Purpose                                        |
+|------------------------|------------------------------------------------|
+| `config/project.yml`   | Main runtime config (paths, scenarios, groups, save formats, bundles). |
+| `R/pipeline.R`         | Orchestration: runs the full pipeline end-to-end. |
+| `R/config_load.R`      | Loads/validates YAML; resolves absolute paths; ensures folders exist. |
+| `R/extract_registry.R` | Declares what to extract from GDX (symbols + dimensions). |
+| `R/io_gdx.R`           | Low-level GDX reads; `extract_all()` returns long tables. |
+| `R/helpers_dt.R`       | Data.table helpers (normalize types, pivot, macro/sector grouping, sums). |
+| `R/helpers_utils.R`    | Misc utilities (logging, project root, path helpers). |
+| `R/derive_indicators.R`| Builds derived indicators from wide base tables. |
+| `R/save_export.R`      | Writes per-symbol files; builds `manifest` and optional `bundles`. |
+| `inst/app/diagnostic/` | Shiny app (internal) — broad variable set. |
+| `inst/app/results/`    | Shiny app (shareable) — slim set + combined CSV option. |
+
+We’ll go file-by-file in Section 3.
+
+
+---
+
+## 2.3 Outputs produced (what to expect after `run_pipeline()`)
+
+```text
+outputs/derived/
+├─ <SYMBOL>.parquet / .feather / .csv / .rds    # per-symbol tables (wide by scenario)
+├─ manifest.rds                                  # index of symbols → best file path/format
+├─ manifest.csv                                  # CSV version of the same index
+├─ bundle_<name>.rds                             # optional bundles configured in YAML
+└─ <name>_bundle.csv                             # optional combined CSV (for sharing)
+```
+
+- **Per-symbol tables** are **wide by scenario** (e.g., `baseline`, `ff55`) and include `delta` and `pct` when applicable.
+- The **manifest** is used by the apps for **lazy loading** (fast startup).
+- **Bundles** package selected symbols together (e.g., for the “results” app or for emailing a single CSV to colleagues).
+
+---
+
+## 2.4 Config knobs (quick glance)
+
+- `paths.gdx_dir` — where your GDX files live (can be a folder with multiple scenario files).
+- `paths.outputs` — where the pipeline writes results.
+- `scenarios` — ordered; first is **baseline**, last is **policy**.
+- `groups.EU28` — country list used for EU/Non-EU/WORLD aggregates.
+- `save.formats` — which file formats to write per symbol (e.g., `["parquet","feather"]`).
+- `save.bundles` — name → { `include`, optional `filters`, optional combined CSV options }.
+
+
+---
+
+## 2.5 Conventions (so you recognize tables)
+
+- **Keys / dimensions:** use short codes (`n`, `i`, `c`, `n1`, `t`, `au`, `oc`, …).
+- **Wide by scenario:** columns named exactly as in `scenarios` (e.g., `baseline`, `ff55`).
+- **Change columns:** `delta` (policy − baseline), `pct` ((policy/baseline) − 1).
+- **Additive aggregations** (e.g., regional totals) are applied only to **absolute** measures.
+- **Sector groups (6):** computed from industry codes (A/B = primary; C* minus high-energy list = low-energy; D/E/F = utilities & construction; G..N = market; O..U = public/personal).
+
+
+
+
+# 3. Detailed content of R folder
+
+## R/aaa_imports.R — Package imports & NSE globals
+
+**Purpose**  
+- Declare package-level imports (so you can use `data.table` without `data.table::`).
+- Register column names and data.table NSE symbols so `R CMD check` doesn’t warn about *“no visible binding for global variable”*.
+
+**Key roxygen directives**
+```r
+#' @import data.table
+#' @importFrom utils globalVariables
+#' @keywords internal
+#' @noRd
+NULL
+```
+
+**Runtime effect**  
+On load (R ≥ 2.15.1) it silences NSE notes for common columns:
+```r
+utils::globalVariables(c(
+  ".SD",".N",".I",".GRP",
+  "value","delta","pct",
+  "n","n1","au","oc","i","c","t","year",
+  "scenario","baseline","ff55"
+))
+```
+
+**Inputs / Outputs**  
+- Inputs: none  
+- Outputs: none (only affects `NAMESPACE` generation and check notes).
+
+**Notes & tips**  
+- If you introduce new on-the-fly columns (e.g., `em`), add them to `globalVariables()`.  
+- Scenario names are hard-coded here for convenience. If you change them in `config/project.yml`, either update the list or drop `"baseline","ff55"` to avoid stale entries.
+
+---
+
+## R/config_load.R — Load & validate configuration
+
+**Purpose**  
+Read YAML config (defaults + project overrides), normalize paths to absolute, ensure required sections exist, create output/cache folders, and set sensible defaults.
+
+**Functions**
+
+- `safe_read_yaml(file)`  
+  Best-effort YAML reader. If the file is missing, unreadable, or not a list, returns an **empty list** instead of erroring.
+
+- `load_config(path = "config/project.yml")` *(exported)*  
+  Step-by-step:
+  1. **Resolve files**  
+     - `def_file` = `proj_path("config", "default.yml")`  
+     - `override_file` = `proj_path(path)` if `path` is a length-1 character.
+  2. **Read YAML**  
+     - `default  <- safe_read_yaml(def_file)`  
+     - `override <- safe_read_yaml(override_file)` (or empty list if `path` is NULL).
+  3. **Merge (override wins)**  
+     `cfg <- utils::modifyList(default, override, keep.null = TRUE)`
+  4. **Ensure sections exist**  
+     Creates empty lists when missing: `paths`, `extract`, `derived`, `validate`.
+  5. **Set defaults** (only if missing):  
+     - `paths$gdx_dir = "data-raw/gdx"`  
+     - `paths$outputs = "outputs"`  
+     - `paths$cache   = "outputs/cache"`  
+     - `scenarios     = "baseline"` *(single name; can be a vector in YAML)*
+  6. **Normalize to absolute paths** using `proj_path()` unless already absolute (Windows or POSIX).
+  7. **Create folders** for `outputs` and `cache` (recursive, quiet).
+  8. **Threads**  
+     - If `cfg$threads` missing, set to `data.table::getDTthreads()`.
+  9. **Return `cfg`** (a nested list ready for the pipeline).
+
+**Inputs / Outputs**  
+- **Input:** `path` (YAML override file; default `config/project.yml`).  
+- **Output:** `cfg` list (with `paths`, `scenarios`, optional `groups`, `save`, etc.).
+
+**Typical usage**
+```r
+cfg <- load_config()          # reads default.yml + project.yml (override wins)
+print_runtime_info(cfg)       # logs resolved paths
+cfg$paths$gdx_dir             # absolute path to GDX root
+cfg$scenarios                 # e.g. c("baseline","ff55")
+```
+
+**Notes & tips**  
+- You can omit `config/default.yml`; `load_config()` works with only `project.yml`.  
+- `scenarios` in YAML should be a **character vector**, e.g. `["baseline","ff55"]`.  
+- Paths in YAML can be relative to the project root; they’re converted to **absolute**.  
+- The function creates `outputs/` and `outputs/cache/` on the fly if missing.
+
+---
+
+## R/packages.R — Package init & suggested-package checks
+
+**Purpose**  
+Set lightweight, package-wide defaults on load (threads & printing) and provide a helper to warn about missing **suggested** packages in interactive sessions.
+
+**What runs automatically**
+
+- `.onLoad(libname, pkgname)`  
+  Executed when the package is loaded. It:
+  - Sets **data.table threads** if the env var `FIDELIO_DT_THREADS` is defined:
+    ```r
+    if (nzchar(Sys.getenv("FIDELIO_DT_THREADS"))) {
+      data.table::setDTthreads(as.integer(Sys.getenv("FIDELIO_DT_THREADS")))
+    }
+    ```
+    To force threads, add to your `~/.Renviron` (or project `.Renviron`):
+    ```
+    FIDELIO_DT_THREADS=4
+    ```
+  - Tweaks **printing options** for friendlier console output:
+    ```r
+    options(
+      datatable.print.nrows = 200L,
+      datatable.print.topn  = 5L,
+      datatable.print.class = TRUE
+    )
+    ```
+
+**Helper**
+
+- `check_suggested(pkgs)`  
+  Soft-check that optional packages are installed. Returns the missing ones (invisible), and prints a message if interactive.
+  ```r
+  missing <- check_suggested(c("arrow","fst","shiny"))
+  if (length(missing)) message("Consider: install.packages(missing)")
+  ```
+
+**Inputs / Outputs**  
+- Inputs: reads the environment variable `FIDELIO_DT_THREADS`.  
+- Outputs: none; sets R options and data.table threads as a **side effect**.
+
+**Notes**  
+- `.onLoad` should stay **fast** (no I/O, no heavy computations).  
+- Users who don’t set `FIDELIO_DT_THREADS` will get data.table’s default thread behavior.  
+- The printing options affect only the current R session and can be overridden by the user later with `options(...)`.
+
+---
+
+## R/helpers_utils.R — Utilities (logging, paths, safe lookups)
+
+**Purpose**  
+General helpers used across the package: timestamped logging, locating the project root, resolving paths, printing runtime info, and safely fetching tables from a list.
+
+**Functions (one-liners)**
+
+- `log_time(msg)`  
+  Print a timestamped message to the console (nice for pipeline logs).
+
+- `project_root(start = getwd())`  
+  Walk up from `start` until a folder containing `DESCRIPTION` or an `.Rproj` is found; return that path.
+
+- `proj_path(...)`  
+  Build an absolute path rooted at `project_root()` (absolute inputs are returned unchanged).
+
+- `print_runtime_info(cfg)`  
+  Log the project root and key paths from `cfg$paths` (e.g., GDX dir, outputs).
+
+- `require_symbol(raw, name, require_cols = NULL, min_rows = 1L, quiet = FALSE)`  
+  Safely retrieve `raw[[name]]` (a data.table). Returns `NULL` with a friendly message if the symbol is missing, empty, or lacks required columns.
+
+**Typical usage**
+```r
+cfg <- load_config()
+print_runtime_info(cfg)
+
+gdx_dir <- proj_path(cfg$paths$gdx_dir)
+
+DT <- require_symbol(raw, "GDPr_t", require_cols = c("n","t","baseline","ff55"))
+if (is.null(DT)) return(invisible(NULL))  # skip a derived indicator if base is missing
+```
+
+**Inputs / Outputs**  
+- Inputs: plain R objects (no I/O performed).  
+- Outputs: return values only; logging goes to the console (`message()`).
+
+**Notes**  
+- `project_root()` lets you use relative paths reliably from anywhere inside the project.  
+- `require_symbol()` is designed for `derive_*` functions to **fail soft** when an upstream table is missing or empty.
+
+---
+
+## R/helpers_dt.R — Data wrangling with data.table
+
+**Purpose**  
+Low-level helpers for consistent table shapes and fast aggregation: normalize types, compute price×quantity values, pivot long→wide, add EU/NonEU/WORLD totals, and attach `delta`/`pct`.
+
+**Functions (one-liners + notes)**
+
+- `norm_value_col(DT)`  
+  Ensure the numeric measure column is named **`value`** (renames common aliases like `val`, `VAL`).
+
+- `norm_key_types(DT)`  
+  Coerce common keys to stable types (`n,i,c,em,au` → **character**; `t` → **numeric**). Also guarantees a data.table.
+
+- `add_var_cols(DT, base = "baseline", pol = "ff55")`  
+  Append **`delta` = pol − base** and **`pct` = (pol/base) − 1**, then reorder columns as keys + base + pol + changes.  
+  _Requires both scenario columns to already exist._
+
+- `sum_value_by(priceDT, qtyDT, by = c("n","t"), filter = NULL, scenarios = c("baseline","ff55"))`  
+  Compute **value = price × quantity** per scenario, then **sum** by the given keys.  
+  - `filter` lets you pre-filter matching columns in both inputs, e.g. `list(au = "X")`.  
+  - Inputs can already be wide-by-scenario; function prefixes columns internally (`P_`, `Q_`).
+
+- `add_macroregions_additive(DT, eu_members, scenarios = c("baseline","ff55"))`  
+  Add **EU28**, **NonEU28**, and **WORLD** rows by summing across `n` for the provided scenarios.  
+  _Only valid for **additive** variables (absolute levels). Skips pre-aggregated rows if present._
+
+- `wide_by_scenario(DT, scenarios)`  
+  Pivot **long** (`scenario`, `value`) to **wide** (one column per scenario). Ensures requested scenario columns exist (filled with `NA` if missing).
+
+**Typical usage**
+
+```r
+# long -> wide by scenario
+w <- wide_by_scenario(long_DT, scenarios = c("baseline","ff55"))
+
+# attach delta/pct
+w <- add_var_cols(w, base = "baseline", pol = "ff55")
+
+# compute value = price * quantity for exports only, summed by (n,t)
+X_val <- sum_value_by(
+  priceDT   = P_USE_t,
+  qtyDT     = USE_PP_t,
+  by        = c("n","t"),
+  filter    = list(au = "X"),
+  scenarios = c("baseline","ff55")
+)
+
+# add EU/NonEU/WORLD totals for an additive table
+with_regions <- add_macroregions_additive(w, eu_members = cfg$groups$EU28,
+                                          scenarios   = c("baseline","ff55"))
+```
+
+**Inputs / Outputs**  
+- Inputs: data.frames/data.tables with standard keys (`n`, `i`, `c`, `n1`, `t`, `au`, `oc`…); scenarios as columns or (for `wide_by_scenario`) as a `scenario` factor + `value`.  
+- Outputs: data.tables with normalized types and expected columns.
+
+**Gotchas / conventions**  
+- **Order matters**: do sector/region **aggregates first** on absolute measures, then compute `delta`/`pct`.  
+- `sum_value_by()` expects **price** and **quantity** tables aligned on the same join keys; it auto-detects join columns (excluding scenario & delta/pct).  
+- If your scenario names differ from `baseline`/`ff55`, always pass them explicitly via the function arguments.
+
+
+```{r, eval=FALSE}
+library(fidelioDiagnostics)
+cfg <- load_config()
+print_runtime_info(cfg)
+res <- run_pipeline()   # extract → derive → save
+```
+
+What you get:
+- `outputs/derived/<symbol>.parquet` (and/or feather/csv/rds as configured)
+- `outputs/derived/manifest.rds` (index for lazy loading)
+- optional `bundle_<name>.rds` and a combined CSV (if configured)
+
+---
+
+## R/io_gdx.R — Read GDX & extract symbols
+
+**Purpose**  
+Open a scenario’s **GDX** file and extract selected symbols into **long** tables (`dims + scenario + value`). Used by the pipeline before pivoting to wide-by-scenario.
+
+**Conventions**
+- GDX files are named `results_all_<scenario>.gdx` and live under `cfg$paths$gdx_dir`.
+- Extraction uses **{gdxtools}**; install if missing:
+  ```r
+  # remotes::install_github("lolow/gdxtools")
+  ```
+
+**Functions (what they do)**
+
+- `gdx_path_for(cfg, scenario)`  
+  Build the absolute path to the GDX for a given scenario (`<outputs>/results_all_<scenario>.gdx`).
+
+- `open_gdx(cfg, scenario)`  
+  Open the GDX with `gdxtools::gdx()`. Errors if the file is missing or {gdxtools} is not installed.
+
+- `symbol_exists(gdx_obj, name)`  
+  Quick check: does a variable/parameter named `name` exist in this GDX?
+
+- `extract_param(gdx_obj, name)`  
+  Low-level extractor for a single symbol. Returns a **data.table** with keys + `value`.  
+  Uses `norm_value_col()` and `norm_key_types()` to standardize column names/types.
+
+- `extract_symbol_all(cfg, reg_row)`  
+  Extract **one symbol across all scenarios** listed in `cfg$scenarios`.  
+  - `reg_row` is one row from the extraction registry with fields:
+    - `symbol`: the GDX symbol name (character)
+    - `dims`: a character vector of expected key columns (e.g., `c("n","i","t")`)
+  - For each scenario:
+    - Opens GDX
+    - Skips with a message if the symbol is missing
+    - Checks all required dims exist (else **stop** with a clear error)
+    - Adds a `scenario` column with the scenario name
+  - Binds all scenarios and returns a **long** table keyed by `c(dims, "scenario")`.
+
+- `extract_all(cfg, reg)` *(exported)*  
+  Vectorized driver: loops over the registry rows, calls `extract_symbol_all()` for each, and returns a **named list** of long tables (names = `reg$symbol`).
+
+- `list_gdx_names(cfg, scenario)`  
+  Utility to list all parameter/variable names in a given GDX (sorted).
+
+**Inputs / Outputs**
+- **Inputs:**  
+  - `cfg`: from `load_config()` (must have `paths$gdx_dir`, `scenarios`)  
+  - `reg`: extraction registry (data.frame/data.table) with columns `symbol` and `dims`  
+- **Outputs:**  
+  - `extract_all()` → named **list** of long tables (`dims + scenario + value`)  
+  - `extract_symbol_all()` → single long table for that symbol
+
+**Typical usage**
+```r
+cfg <- load_config()
+# reg is produced by plan_extractions() in R/extract_registry.R
+raw <- extract_all(cfg, reg)          # list("GDPr_t" = <long>, "I_PP_t" = <long>, ...)
+
+raw[["GDPr_t"]][, .(n, t, scenario, value)][1:5]  # peek
+```
+
+**Gotchas / notes**
+- **File naming:** expects `results_all_<scenario>.gdx`; adjust `gdx_path_for()` if yours differ.  
+- **Missing symbols:** skipped with a message (not an error) so the pipeline can continue.  
+- **Missing dims:** treated as a **schema error** and stops (better to fail early).  
+- Outputs are **long**; downstream helpers (`wide_by_scenario()`, `add_macroregions_additive()`, `add_var_cols()`) expect either long or wide accordingly.
+
+
+
+
+---
+
+## R/extract_registry.R — What to extract (symbols + expected dims)
+
+**Purpose**  
+Declare the **registry** of GDX symbols to pull, with the **key dimensions** each symbol must have, and a human-readable **label**. The registry drives `extract_all()`.
+
+**Function**
+
+- `plan_extractions(cfg)` *(exported)*  
+  Returns a `data.table` with columns:
+  - `symbol` — GDX symbol name (e.g., `"GDPr_t"`, `"I_PP_t"`)
+  - `dims`   — list-column of character vectors (e.g., `c("n","i","t")`)
+  - `label`  — short description for UI/plots
+
+  It also supports optional **filtering** via YAML:
+  ```yaml
+  extract:
+    include: ["GDPr_t","I_PP_t","BITRADE_t"]   # keep only these
+  ```
+  If `extract.include` is non-empty, only listed symbols remain.  
+  Stops with an error if the registry becomes empty after filtering.
+
+**Registry contents (snapshot)**
+
+| Symbol         | Dims            | Label                           |
+|----------------|-----------------|---------------------------------|
+| `GDPr_t`       | `n, t`          | Real GDP                        |
+| `HSAVR_t`      | `n, t`          | Household saving rate           |
+| `HDY_VAL_t`    | `n, t`          | HH disposable income (val)      |
+| `GSUR_VAL_t`   | `n, t`          | Gov surplus (val)               |
+| `GINV_VAL_t`   | `n, t`          | Gov investment (val)            |
+| `U_t`          | `n, t`          | Unemployment                    |
+| `ir_t`         | `n, t`          | Interest rate                   |
+| `TB_t`         | `n, t`          | Trade balance                   |
+| `Q_t`          | `n, i, t`       | Output                          |
+| `I_PP_t`       | `n, i, t`       | Investment (PP)                 |
+| `P_I_t`        | `n, i, t`       | Investment price                |
+| `K_t`          | `n, i, t`       | Capital                         |
+| `L_t`          | `n, i, t`       | Labor                           |
+| `P_Q_t`        | `n, i, t`       | Output price                    |
+| `P_INPUT_t`    | `n, i, oc, t`   | Input price (oc)                |
+| `P_CPI_t`      | `n, au, t`      | Consumer price index            |
+| `USE_PP_t`     | `n, c, au, t`   | Use at purchasers' prices       |
+| `M_TOT_t`      | `n, c, t`       | Total imports                   |
+| `P_USE_t`      | `n, c, au, t`   | Use price                       |
+| `P_Mcif_t`     | `n, c, t`       | Import price (cif)              |
+| `BITRADE_t`    | `n, n1, c, t`   | Bilateral trade                 |
+| `GHG_t`        | `n, i, t`       | Emissions                       |
+
+> Dimensions use short codes: `n` (country), `i` (industry), `c` (commodity), `n1` (partner), `oc` (input type), `au` (aggregate usage), `t` (time).
+
+**Typical usage**
+```r
+cfg <- load_config()
+reg <- plan_extractions(cfg)
+raw <- extract_all(cfg, reg)  # named list of long tables (dims + scenario + value)
+```
+
+**Extending the registry**
+- Add a new row to the `symbol` and `dims` vectors (and a label).
+- Keep dimension names consistent with the rest of the package.
+- If you want to *temporarily* limit extractions, use `extract.include` in YAML rather than editing code.
+
+**Gotchas**
+- `extract_all()` will **error** if a symbol exists but is missing required dims (schema mismatch).  
+- Symbols missing in some scenarios are **skipped** for those scenarios (with a message) and the rest are combined.
+
+
+
+---
+
+## R/derive_indicators.R — Sector groups & derived indicators (from wide tables)
+
+**Purpose**  
+Provide (1) a generalized **6-sector grouping** and (2) functions that build the **derived indicators** from already **wide-by-scenario** base tables (`results_by_symbol`).
+
+
+### Sector grouping (6 groups)
+
+- `.sector_group6_vec(ic, high_energy = c("C17","C19","C20","C23","C24"))`  
+  Map industry codes to:
+  - `primary`  → codes starting with **A** or **B**  
+  - `high_energy_manufacturing` → **explicit list** (e.g., C17, C19, C20, C23, C24)  
+  - `low_energy_manufacturing`  → codes starting with **C** **except** high-energy list  
+  - `utilities_construction`    → codes starting with **D/E/F**  
+  - `market_services`           → codes starting with **G..N**  
+  - `public_personal_services`  → codes starting with **O..U**  
+  Others → `other`. Matching is prefix-based (so `C24`, `C24_…` all match).
+
+- `add_sector_groups_additive(DT, scenarios, append_original = TRUE)`  
+  Input: **wide** table with columns `n, i, t, <scenarios…>` (absolute values).  
+  Output: sum by the 6 groups; also adds a **`TOT_G6`** row by `(n,t)`.  
+  If `append_original = TRUE`, original industries are kept and grouped rows are **added**.
+
+> **Rule of thumb:** compute sector/regional **aggregates first** on **absolute** measures, then add `delta`/`pct`.
+
+### Public helpers (entry points)
+
+- `derive_all(raw, cfg)` *(exported)*  
+  Runs “long-based” derived indicators directly from `raw` (rare here). Defaults to `TB_GDP_t` if nothing is requested via `cfg$derived$include`. Returns a named list of **long** tables (if any).
+
+- `derive_from_wide(rs, cfg)` *(exported)*  
+  Main derivation step from **wide** base tables (named list `rs`).  
+  Uses `cfg$scenarios` (`base_scn`, `pol_scn`) and `cfg$groups$EU28` for aggregates.  
+  Returns a named list of **wide** tables with `delta` and `pct` attached.
+
+What it computes (if inputs are present):
+
+| Name | Level | Definition / Notes |
+|------|------|---------------------|
+| `I_TOT_PP_t` | (n,t) | Sum of `I_PP_t` over **i**. Then add EU/NonEU/WORLD and `delta`/`pct`. |
+| `TB_t` | (n,t) | **Nominal TB** = Exports − Imports built from values: `sum_value_by(P_USE × USE_PP, au="X")` − `sum_value_by(P_Mcif × M_TOT)`. Then EU/NonEU/WORLD and changes. |
+| `TBr_t` | (n,t) | **Real TB** from `BITRADE_t`: exporter totals (sum over `n1,c`) − importer totals (sum over `n,c`), after dropping pre-aggregated rows and `c != "TOT"`. Then EU/NonEU/WORLD and changes. |
+| `TB_GDP_t` | (n,t) | TB / `GDPr_t` per scenario; then changes. |
+| `FS_t` | (n,t) | **Foreign savings**: `INV − TB − (HSAVR × HDY_VAL) − GSUR_VAL − GINV_VAL` (per scenario). Then EU/NonEU/WORLD and changes. |
+| `DS_t` | (n,t) | **Domestic savings**: `GSUR_VAL + GINV_VAL + (HSAVR × HDY_VAL)` (per scenario). Then EU/NonEU/WORLD and changes. |
+| `P_HH_CPI_t` | (n,t) | From `P_CPI_t[au=="CP"]`. Changes attached. |
+| `KLratio_t` | (n,i,t) | `K_t / L_t` per scenario. Also produces country-level `KLratio_country_t` by summing K and L over **i** then dividing. |
+| `P_KL_t` | (n,i,t) | Relative **input price** `P_INPUT_t[oc=="K"] / P_INPUT_t[oc=="L"]` per scenario; then changes. |
+| `I_PP_SECT6_t` | (n,i6,t) | `I_PP_t` grouped into the 6 sector groups (adds EU/NonEU/WORLD), then `delta`/`pct`. |
+| `OUT_COMP6_SHARE_REAL_t` | (n,i6,t) | **Output composition (real shares ×100)**: 1) Take **quantities** (`Q_t`). If missing, **deflate value by price** to get quantities. 2) Aggregate to 6 groups. 3) Add EU macroregions. 4) Convert to **shares** within `(n,t)` per scenario. 5) Add `delta`/`pct` on the shares. |
+
+
+**Inputs / Outputs**
+- **Input** to `derive_from_wide()`:
+  - `rs`: named list of **wide** data.tables (e.g., `rs[["GDPr_t"]]` with columns `n,t,<scenarios>`).
+  - `cfg`: must provide `scenarios` and `groups$EU28`.
+- **Output**: named list of **wide** data.tables, each with:
+  - keys (e.g., `n`, `i`, `t`)
+  - scenario columns (`base_scn`, `pol_scn`)
+  - `delta`, `pct`
+
+
+**Conventions & gotchas**
+- **Order matters:** aggregate (sector/region) **before** computing `delta/pct`. Shares are **not additive**, so macroregions are added **before** converting to shares.
+- Drops any pre-aggregated rows like `"EU28","NonEU28","WORLD"` for regional recomputation.
+- In trade regionalization, a helper `.region_map_vec()` bins `n`/`n1` into `"EEU","NWEU","SEU","USA","CHN","IND","OECD","NonOECD","ROW"`. Adjust as needed or move to YAML later.
+- `year := 2014 + as.integer(t)` in the BITRADE block assumes **t=1→2015**; adjust the base year if needed.
+- Relies on `data.table` semantics (e.g., `fifelse`); the package imports `data.table`, so no prefixes are needed.
+
+**Typical usage**
+```r
+# rs = results_by_symbol (wide) produced earlier in the pipeline
+drv <- derive_from_wide(rs, cfg)
+
+names(drv)
+# [1] "I_TOT_PP_t" "TB_t" "TBr_t" "TB_GDP_t" "FS_t" "DS_t"
+#     "P_HH_CPI_t" "KLratio_t" "KLratio_country_t" "P_KL_t"
+#     "I_PP_SECT6_t" "OUT_COMP6_SHARE_REAL_t" "BITRADE_REG_t"
+```
+
+---
+
+## R/save_export.R — Write files, build manifest, make bundles/CSVs
+
+**Purpose**  
+Persist the pipeline outputs: per-symbol files in chosen formats, a **manifest** index for fast app loading, and optional **bundles** (named subsets) with an optional **single combined CSV** for sharing.
+
+**Main entry**
+
+- `save_artifacts(objs, cfg, subdir = NULL)` *(exported)*  
+  - `objs`: named list of data.tables (e.g., from `results_by_symbol` + `derive_from_wide`)  
+  - `cfg$save$formats`: which per-symbol formats to write; one or more of  
+    `["parquet","feather","fst","csv","rds"]`  
+  - `subdir`: optional subfolder under `cfg$paths$outputs` (e.g., `"derived"`)
+
+  **What it does**
+  1. Creates the output directory.
+  2. For each symbol `nm` in `objs`, writes `nm.<ext>` for all requested formats.  
+     - **Parquet/Feather** via `{arrow}` (fast, columnar, great for Shiny).  
+     - **fst** via `{fst}` (very fast R-native).  
+     - **csv** via `data.table::fwrite()` (portable, bigger).  
+     - **rds** via `saveRDS()` (R-native single-object).
+  3. Builds a **manifest** with `make_manifest()` (CSV + RDS).
+  4. Creates optional **bundles/CSVs** via `make_bundles()` from YAML spec.
+
+  Returns the output directory (invisibly).
+
+
+**Supporting pieces**
+
+- `make_manifest(objs, outdir)`  
+  Scans written files for each symbol and records:
+  `symbol, format, path, nrows`.  
+  Saves to `manifest.csv` and `manifest.rds` in `outdir`.  
+  *Used by Shiny apps for lazy loading (pick the best/fastest format available).*
+
+- `apply_filters(DT, filt)`  
+  Apply **symbol-specific** keep/drop lists before bundling:
+  ```yaml
+  save:
+    bundles:
+      results_app:
+        include: ["BITRADE_REG_t", ...]
+        filters:
+          BITRADE_REG_t:
+            keep:
+              c: ["TOT"]           # keep only commodity total
+            drop:
+              n: ["WORLD"]         # (example) drop WORLD if not needed
+  ```
+
+- `norm_for_csv(DT, symbol, prefer = c("baseline","ff55","delta","pct"))`  
+  Normalize any table for stacking into a **single CSV**:
+  - Ensures a full set of **dimension columns** exist (`n, n1, i, c, au, oc, t`), adding `NA` if missing.
+  - Adds a `symbol` column.
+  - Orders columns: `symbol`, dims, then measurement columns found among `prefer`.
+
+- `make_bundles(objs, outdir, bundles_spec)`  
+  For each bundle name in YAML:
+  1. Select `include`d symbols present in `objs`.
+  2. Apply `filters` per-symbol (`keep`/`drop`).
+  3. Save an RDS file: `bundle_<name>.rds` (named list of filtered tables).
+  4. If `csv_combine: true`, also write **one combined CSV** with either the
+     original long shape or wide (it pads dims either way):
+     ```yaml
+     save:
+       bundles:
+         results_app:
+           include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+           filters:
+             BITRADE_REG_t:
+               keep:
+                 c: ["TOT"]
+           csv_combine: true
+           csv_basename: "results_bundle"   # default = bundle name
+           csv_shape: "wide"                 # or "long"
+     ```
+
+- `%||%` (null-coalescing helper)  
+  `x %||% y` → returns `x` unless `x` is `NULL`, otherwise `y`.
+
+
+**Inputs / Outputs**  
+- **Inputs:** `objs` (named list of data.tables), `cfg` (for paths, formats, bundles).  
+- **Outputs:** files in `outdir`:
+  - Per-symbol: `<symbol>.<ext>` for each requested format
+  - `manifest.csv` and `manifest.rds`
+  - `bundle_<name>.rds` (per bundle)
+  - Optional combined CSV: `<csv_basename>.csv`
+
+**Notes & tips**  
+- If a format’s package isn’t installed (e.g., `{arrow}` for parquet/feather), install it or remove that format from `cfg$save$formats`.  
+- Empty tables (0 rows) are skipped.  
+- Use **Parquet/Feather** for best Shiny/app performance; **CSV** for sharing.  
+- You can organize runs by passing `subdir = "derived"` (so files land in `outputs/derived/`).  
+- The **manifest** lets the app open only what it needs (fast startup), falling back to the best available format.
+
+
+
+
+
+---
+
+## R/pipeline.R — End-to-end pipeline
+
+**Purpose**  
+Run the whole workflow in one call: *extract → wide → macro-aggregates → deltas/% → derived indicators → save to disk.*
+
+**Function**
+
+```{r, eval=FALSE}
+# Run the whole workflow
+run_pipeline(config = "config/project.yml")
+```
+
+# 4. How to run
+
+This section shows the minimum you need to do to reproduce the full pipeline and open the Shiny apps.
+
+### 4.1 Quick start (default config)
+
+```r
+# From the package root (where DESCRIPTION lives)
+library(fidelioDiagnostics)
+
+# 1) Load configuration (reads config/project.yml and merges with config/default.yml)
+cfg <- load_config()
+
+# (Optional) print where inputs/outputs are
+print_runtime_info(cfg)
+
+# 2) Run the whole workflow
+#    extract → wide → macro-aggregates → deltas/% → derived → save to disk
+res <- run_pipeline()   # same as run_pipeline("config/project.yml")
+
+# 3) Explore in-memory results (optional)
+names(res$results_by_symbol)        # base/wide tables by symbol
+names(res$derived)                  # derived indicators you configured
+
+# 4) Launch the apps
+launch_app("diagnostic")  # internal diagnostic app (full set)
+# launch_app("results")   # slim results app (subset/bundle)
+```
+
+
+# 5. Launch the apps
+```{r, eval=FALSE}
+launch_app("diagnostic")
+launch_app("results")
+```
+
+# 6. Configuration (quick reference)
+Edit `config/project.yml`:
+- `paths.gdx_dir`, `paths.outputs`
+- `scenarios: ["baseline","ff55"]`
+- `groups.EU28: [...]`
+- `save.formats: ["parquet","feather"]`
+- `save.bundles: { diagnostic_app: {...}, results_app: {...} }`
+
+# 7. Troubleshooting (common)
+- Missing scenario columns → widen first with `wide_by_scenario()`
+- Sector groups need wide, absolute values before deltas
+- Outputs not found in app → check `outputs/derived/manifest.rds`

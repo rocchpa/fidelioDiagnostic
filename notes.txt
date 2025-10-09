@@ -1,0 +1,40 @@
+
+
+TO UPDATE THE USER GUIDE AFTER SAVING CHANGES
+devtools::build_vignettes()
+
+TO UPDATE THE READ ME FILE AFTER SAVING CHANGES
+devtools::build_readme()
+
+TO BROWSE THE USER GUIDE ONLINE
+if (file.exists("doc/user_guide.html")) browseURL("doc/user_guide.html")
+
+TO CREATE PDF
+rmarkdown::render(
+  "vignettes/user_guide.Rmd",
+  output_format = "pdf_document",
+  output_dir    = "doc"
+)
+
+
+TO COMPILE ALL FILES
+devtools::load_all()
+
+
+devtools::document()
+devtools::install()
+fidelioDiagnostics::launch_app("diagnostic")
+fidelioDiagnostics::launch_app("diagnostic", project_root = getwd())
+
+fidelioDiagnostics::launch_app(
+  "diagnostic",
+  outputs_dir = normalizePath("outputs/derived", mustWork = TRUE)
+)
+
+
+
+
+
+
+
+

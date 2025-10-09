@@ -28,9 +28,9 @@ For local development:
 ``` r
 # from package root
 # install.packages("devtools")
-devtools::load_all()      # develop interactively
-devtools::document()      # update docs/NAMESPACE
-devtools::install()       # install locally
+devtools::load_all()      # develop interactively (no install)
+devtools::document()      # update docs/NAMESPACE from roxygen comments
+devtools::install()       # build & install into your R library
 ```
 
 ------------------------------------------------------------------------
@@ -121,6 +121,101 @@ present, they can also load targeted `bundle_*.rds`.
 
 Tables are wide by scenario (`baseline`, `ff55`) and include `delta` and
 `pct` where relevant.
+
+------------------------------------------------------------------------
+
+## Developer quick guide (devtools)
+
+### What each command does
+
+- `devtools::document()`  
+  Generate **NAMESPACE** and \*\*man/\*.Rd\*\* from roxygen comments
+  (`#' @export`, `@param`, …).
+
+- `devtools::load_all()`  
+  Load the package **from source** into the current session (no
+  install). Fast feedback loop.
+
+- `devtools::install()`  
+  Build & install into your user library (use in fresh R sessions or
+  scripts).
+
+- `devtools::check()`  
+  Run CRAN-like checks (R CMD check, docs, examples, namespace,
+  DESCRIPTION, etc.).
+
+- `devtools::build()`  
+  Create a source tarball (`.tar.gz`) you can share/install elsewhere.
+
+- `devtools::test()`  
+  Run **testthat** tests under `tests/`.
+
+- `devtools::build_vignettes()` / `devtools::clean_vignettes()`  
+  Build/clean vignettes if you ship them.
+
+- `devtools::build_readme()`  
+  Knit `README.Rmd` → `README.md`.
+
+> **Tip:** If you want roxygen to manage `NAMESPACE`, delete any
+> manually-created `NAMESPACE` and run `devtools::document()`.
+
+### Common recipes
+
+#### 1) Fast inner dev loop
+
+``` r
+# edit code in R/*.R
+devtools::load_all()
+
+# if you changed roxygen tags/docs/exports:
+devtools::document()
+devtools::load_all()
+
+# try your functions/apps
+fidelioDiagnostics::run_pipeline()
+fidelioDiagnostics::launch_app("diagnostic")
+```
+
+#### 2) Install & use in a fresh session
+
+``` r
+devtools::document()
+devtools::install()
+# restart R, then:
+library(fidelioDiagnostics)
+launch_app("results")
+```
+
+#### 3) Pre-commit / pre-share sanity check
+
+``` r
+devtools::document()
+devtools::check()
+```
+
+#### 4) Build a distributable
+
+``` r
+devtools::document()
+devtools::check()
+devtools::build()   # creates fidelioDiagnostics_<version>.tar.gz
+```
+
+#### 5) Shiny app dev loop (recommended)
+
+``` r
+# keep a console open in the package root
+devtools::document()   # only if roxygen changes
+devtools::load_all()
+launch_app("diagnostic")   # or "results"
+```
+
+**Decision mini-tree** - Changed **function code only** →
+`load_all()`.  
+- Changed **roxygen/exports/docs** → `document()` then `load_all()`.  
+- Need to **use in another session** → `install()`.  
+- About to **share** or something fails mysteriously → `check()`.  
+- Need an **archive** → `build()`.
 
 ------------------------------------------------------------------------
 

@@ -1,6 +1,7 @@
 # ==============================================================================
 # ====                            helpers_dt.R                             =====
 # ==============================================================================
+
 # data.table-centric helpers: type normalization, pivots, sums, aggregates.
 
 # >>> ensure the numeric measure column is named 'value' -----------------------
