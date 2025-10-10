@@ -4,7 +4,7 @@
 \alias{load_config}
 \title{Load and validate configuration (defaults + overrides)}
 \usage{
-load_config(path = "config/project.yml")
+load_config(path = "config/project.yml", verbose = TRUE)
 }
 \description{
 Load and validate configuration (defaults + overrides)
