@@ -163,62 +163,62 @@ Tables are wide by scenario (`baseline`, `ff55`) and include `delta` and `pct` w
 ### Common recipes
 
 #### 1) Fast inner dev loop
-```{r, eval=FALSE}
-# edit code in R/*.R
-devtools::load_all()
 
-# if you changed roxygen tags/docs/exports:
-devtools::document()
-devtools::load_all()
+    # edit code in R/*.R
+    devtools::load_all()
 
-# try your functions/apps
-fidelioDiagnostics::run_pipeline()
-fidelioDiagnostics::launch_app("diagnostic")
-```
+    # if you changed roxygen tags/exports/docs:
+    devtools::document()
+    devtools::load_all()
+
+    # try your functions/pipeline/apps (same session)
+    fidelioDiagnostics::run_pipeline()
+    fidelioDiagnostics::launch_app("diagnostic")  # or "results"
 
 #### 2) Install & use in a fresh session
-```{r, eval=FALSE}
-devtools::document()
-devtools::install()
-# restart R, then:
-library(fidelioDiagnostics)
-launch_app("results")
-```
+
+    devtools::document()
+    devtools::install(upgrade = "never", dependencies = FALSE, build_vignettes = FALSE)
+
+    # restart the R session, then:
+    .rs.restartR(); library(fidelioDiagnostics)
+    fidelioDiagnostics::launch_app("results")
 
 #### 3) Pre-commit / pre-share sanity check
-```{r, eval=FALSE}
-devtools::document()
-devtools::check()
-```
 
-#### 4) Build a distributable
-```{r, eval=FALSE}
-devtools::document()
-devtools::check()
-devtools::build()   # creates fidelioDiagnostics_<version>.tar.gz
-```
+    devtools::document()
+    devtools::check()
+
+#### 4) Build a distributable (source tarball)
+
+    devtools::document()
+    devtools::check()
+    devtools::build()   # creates fidelioDiagnostics_<version>.tar.gz
 
 #### 5) Shiny app dev loop (recommended)
-```{r, eval=FALSE}
-# keep a console open in the package root
-devtools::document()   # only if roxygen changes
-devtools::load_all()
-launch_app("diagnostic")   # or "results"
-```
+
+    # keep a console open at the package root
+    devtools::document()   # only when roxygen/exports changed
+    devtools::load_all()
+    fidelioDiagnostics::launch_app("diagnostic")   # or "results"
+
+#### 6) Run the pipeline (reads config/project.yml)
+
+    # no install needed if you only edited YAML
+    fidelioDiagnostics::run_pipeline()
 
 **Decision mini-tree**
-- Changed **function code only** → `load_all()`.  
-- Changed **roxygen/exports/docs** → `document()` then `load_all()`.  
-- Need to **use in another session** → `install()`.  
-- About to **share** or something fails mysteriously → `check()`.  
-- Need an **archive** → `build()`.
+
+- Changed **function code only** → `devtools::load_all()`
+- Changed **roxygen/exports/docs** → `devtools::document()` then `devtools::load_all()`
+- Need to **use in another/new session** → `devtools::install(upgrade = "never", dependencies = FALSE, build_vignettes = FALSE)` then restart + `library(fidelioDiagnostics)`
+- About to **share** or something is flaky → `devtools::check()`
+- Need an **archive** → `devtools::build()`
 
 ---
 
 ## Re-render this README
 
-```{r, eval=FALSE}
-devtools::build_readme()
-```
+    devtools::build_readme()
 
 > Commit both `README.Rmd` and the generated `README.md` (plus any figures under `man/figures/`).

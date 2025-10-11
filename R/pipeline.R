@@ -109,4 +109,22 @@ run_pipeline <- function(config = "config/project.yml") {
   if (length(derived)) message("Built derived: ", paste(names(derived), collapse = ", "))
   
   invisible(list(cfg = cfg, raw = raw, results_by_symbol = results_by_symbol, derived = derived))
+  
+  
+  # Optional CSV exporter (reads the saved bundle)
+  if (isTRUE(cfg$export_csv$enabled)) {
+    export_results_csv(
+      cfg            = cfg,
+      bundle_name    = cfg$save$bundles$results_app %>% { if (length(.) ) "results_app" else "results_app" },
+      out_basename   = cfg$export_csv$out_basename %||% "results_bundle_template",
+      model_name     = cfg$export_csv$model_name    %||% "FIDELIO",
+      pct_as_percent = isTRUE(cfg$export_csv$pct_as_percent),
+      include_dim_names = isTRUE(cfg$export_csv$include_dim_names),
+      unit_overrides = cfg$export_csv$unit_overrides %||% list()
+    )
+  }
+  
+  
+  
+  
 }

@@ -2,80 +2,96 @@
 # ====                          Configuration                           ========
 # ==============================================================================
 
-# ----------------------------  Best-effort read--------------------------------
-
+# ----------------------------  Best-effort read --------------------------------
+# Returns a list() in all cases (never NULL), even if the YAML file is empty.
 safe_read_yaml <- function(file) {
-  if (!file.exists(file)) return(list())
-  y <- tryCatch(yaml::read_yaml(file), error = function(e) NULL)
-  if (is.null(y) || !is.list(y)) return(list())
-  y
+  if (is.null(file) || !nzchar(file) || !file.exists(file)) return(list())
+  obj <- tryCatch(yaml::read_yaml(file), error = function(e) NULL)
+  if (is.null(obj) || !is.list(obj)) return(list())
+  obj
 }
 
-# ----------------------------  Load configuration -----------------------------
+# ----------------------------  Small path helpers ------------------------------
+.is_abs <- function(p) {
+  # Windows drive (C:\ or C:/), UNC (\\server\share), or Unix root (/)
+  grepl("^[A-Za-z]:[/\\\\]|^/|^\\\\\\\\", p %||% "")
+}
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+.to_abs <- function(p) {
+  if (is.null(p) || !nzchar(p)) return("")
+  p <- path.expand(p)
+  if (.is_abs(p)) {
+    normalizePath(p, winslash = "/", mustWork = FALSE)
+  } else {
+    # Resolve relative to the *current project root*.
+    # If you have a proj_path() in your package, use it; otherwise use getwd().
+    .proj_path <- get0("proj_path", mode = "function", inherits = TRUE,
+                       ifnotfound = function(...) file.path(getwd(), ...))
+    normalizePath(.proj_path(p), winslash = "/", mustWork = FALSE)
+  }
+}
+
+# ----------------------------  Load configuration ------------------------------
 #' Load and validate configuration (defaults + overrides)
+#'
+#' Robust to empty YAMLs. Ensures required sections/paths exist and are absolute.
+#'
+#' @param path Path to project YAML (default "config/project.yml"). If a list is
+#'   supplied, it is treated as the overrides object directly.
+#' @param verbose Print resolved paths.
 #' @export
 load_config <- function(path = "config/project.yml", verbose = TRUE) {
-  # -- helpers ---------------------------------------------------------------
-  # Resolve paths relative to the project root used by proj_path()
-  # (proj_path() is already available in your package; we reuse it)
-  .is_abs <- function(p) {
-    # Windows drive (C:\ or C:/), UNC (\\server\share), or Unix root (/)
-    grepl("^[A-Za-z]:[/\\\\]|^/|^\\\\\\\\", p)
-  }
-  .to_abs <- function(p) {
-    p <- path.expand(p)
-    if (.is_abs(p)) {
-      normalizePath(p, winslash = "/", mustWork = FALSE)
-    } else {
-      normalizePath(proj_path(p), winslash = "/", mustWork = FALSE)
-    }
-  }
-  safe_read_yaml <- function(f) {
-    if (is.null(f) || !nzchar(f) || !file.exists(f)) return(list())
-    yaml::read_yaml(f)
-  }
+  # -- locate files ------------------------------------------------------------
+  def_file      <- .to_abs("config/default.yml")
+  override_file <- if (is.character(path) && length(path) == 1L) .to_abs(path) else NULL
   
-  # -- load default + project ------------------------------------------------
-  def_file      <- proj_path("config", "default.yml")
-  override_file <- if (is.character(path) && length(path) == 1L) proj_path(path) else NULL
-  
+  # -- read YAMLs safely (empty -> list()) ------------------------------------
   default  <- safe_read_yaml(def_file)
-  override <- safe_read_yaml(override_file)
+  override <- if (is.list(path)) path else safe_read_yaml(override_file)
   
-  # merge (project overrides default)
+  # -- merge (project overrides default) --------------------------------------
+  # safe: both are lists by construction above
   cfg <- utils::modifyList(default, override, keep.null = TRUE)
   
-  # -- ensure sections exist -------------------------------------------------
+  # -- ensure sections exist ---------------------------------------------------
   if (is.null(cfg$paths))    cfg$paths    <- list()
   if (is.null(cfg$extract))  cfg$extract  <- list(include = character())
   if (is.null(cfg$derived))  cfg$derived  <- list(include = character())
   if (is.null(cfg$validate)) cfg$validate <- list(rules  = character())
   
-  # -- defaults --------------------------------------------------------------
-  if (is.null(cfg$paths$gdx_dir) || !nzchar(cfg$paths$gdx_dir)) cfg$paths$gdx_dir <- "data-raw/gdx"
-  if (is.null(cfg$paths$outputs) || !nzchar(cfg$paths$outputs)) cfg$paths$outputs <- "outputs"
-  if (is.null(cfg$paths$cache)   || !nzchar(cfg$paths$cache))   cfg$paths$cache   <- "outputs/cache"
-  if (is.null(cfg$scenarios)     || !length(cfg$scenarios))     cfg$scenarios     <- "baseline"
+  # -- sane defaults -----------------------------------------------------------
+  if (is.null(cfg$paths$gdx_dir) || !nzchar(cfg$paths$gdx_dir))
+    cfg$paths$gdx_dir <- "data-raw/gdx"
+  if (is.null(cfg$paths$outputs) || !nzchar(cfg$paths$outputs))
+    cfg$paths$outputs <- "outputs"
+  if (is.null(cfg$paths$cache)   || !nzchar(cfg$paths$cache))
+    cfg$paths$cache   <- "outputs/cache"
   
-  # -- optional session overrides -------------------------------------------
-  # Let advanced users override these in the current R session
+  # If scenarios missing, default to baseline + a policy case
+  if (is.null(cfg$scenarios) || !length(cfg$scenarios))
+    cfg$scenarios <- c("baseline","ff55")
+  
+  # -- optional session overrides ---------------------------------------------
   cfg$paths$gdx_dir <- getOption("fidelio.gdx_dir", cfg$paths$gdx_dir)
   cfg$paths$outputs <- getOption("fidelio.outputs", cfg$paths$outputs)
   cfg$paths$cache   <- getOption("fidelio.cache",   cfg$paths$cache)
   
-  # -- normalize to absolute paths ------------------------------------------
+  # -- normalize to absolute paths --------------------------------------------
   cfg$paths$gdx_dir <- .to_abs(cfg$paths$gdx_dir)
   cfg$paths$outputs <- .to_abs(cfg$paths$outputs)
   cfg$paths$cache   <- .to_abs(cfg$paths$cache)
   
-  # -- ensure dirs exist -----------------------------------------------------
-  dir.create(cfg$paths$outputs, showWarnings = FALSE, recursive = TRUE)
-  dir.create(cfg$paths$cache,   showWarnings = FALSE, recursive = TRUE)
+  # -- ensure dirs exist -------------------------------------------------------
+  if (nzchar(cfg$paths$outputs))
+    dir.create(cfg$paths$outputs, showWarnings = FALSE, recursive = TRUE)
+  if (nzchar(cfg$paths$cache))
+    dir.create(cfg$paths$cache,   showWarnings = FALSE, recursive = TRUE)
   
-  # -- threads default -------------------------------------------------------
+  # -- threads default ---------------------------------------------------------
   if (is.null(cfg$threads)) cfg$threads <- data.table::getDTthreads()
   
-  # -- breadcrumbs -----------------------------------------------------------
+  # -- breadcrumbs -------------------------------------------------------------
   if (isTRUE(verbose)) {
     message("[CONFIG] Using gdx_dir = ", cfg$paths$gdx_dir)
     message("[CONFIG] Using outputs = ", cfg$paths$outputs)
@@ -83,6 +99,3 @@ load_config <- function(path = "config/project.yml", verbose = TRUE) {
   
   cfg
 }
-
-
-#...............................................................................

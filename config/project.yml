@@ -49,3 +49,17 @@ derive:
   # optional: tell the promoter which keys to use when coercing long->wide
   # keys:
   #   GDPr_t: ["n","t"]
+
+
+export_csv:
+  enabled: true
+  bundle: "results_app"
+  out_basename: "results_bundle_template"  # becomes outputs/derived/<name>.csv
+  model_name: "FIDELIO"
+  pct_as_percent: true
+  include_dim_names: true
+  unit_overrides:
+    GDPr_t: "real (base=2014)"
+    TB_GDP_t: "ratio"
+    I_PP_SECT6_t: "PP units"
+

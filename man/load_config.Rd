@@ -6,6 +6,12 @@
 \usage{
 load_config(path = "config/project.yml", verbose = TRUE)
 }
+\arguments{
+\item{path}{Path to project YAML (default "config/project.yml"). If a list is
+supplied, it is treated as the overrides object directly.}
+
+\item{verbose}{Print resolved paths.}
+}
 \description{
-Load and validate configuration (defaults + overrides)
+Robust to empty YAMLs. Ensures required sections/paths exist and are absolute.
 }

@@ -1,16 +1,11 @@
-# paths:
-#   gdx_dir: "fidelio/gdx"
-#   outputs: "outputs"
-# scenarios: ["baseline"]
-# 
-# extract:
-#   include: []
-# 
-# derived:
-#   include: []
-# 
-# save:
-#   formats: ["csv"]
-# 
-# validate:
-#   rules: []
+paths:
+  gdx_dir: "data-raw/gdx"
+  outputs: "outputs"
+  cache: "cache"
+
+scenarios: ["baseline","ff55"]
+
+save:
+  bundles:
+    results_app: true
+    
