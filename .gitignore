@@ -20,7 +20,8 @@ outputs/**
 !outputs/.gitkeep
 
 # Large/raw inputs (don’t version)
-data-raw/gdx/
+data-raw/gdx/*      # ignore all contents
+!data-raw/gdx/.gitkeep   # except this placeholder
 
 # Large generated tables
 *.feather
