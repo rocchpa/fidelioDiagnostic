@@ -72,7 +72,6 @@ library(gdxrrw)
 
 # Load configuration and print paths
 cfg <- load_config()
-print_runtime_info(cfg)
 
 # Link to your GAMS installation (example path; adapt as needed)
 igdx("C:/GAMS/51")
