@@ -20,7 +20,7 @@
 ``` r
 # install the dev version from GitHub (edit owner/org as needed)
 # install.packages("remotes")
-remotes::install_github("your-org/fidelioDiagnostics")
+remotes::install_github("rocchpa/fidelioDiagnostic")
 ```
 
 For local development:
