@@ -15,12 +15,115 @@
 
 ------------------------------------------------------------------------
 
+## How to use
+
+Follow these steps to set up and run the `fidelioDiagnostics` package
+locally.
+
+### 1) Clone the repository
+
+From your terminal or RStudio:
+
+``` bash
+git clone https://github.com/rocchpa/fidelioDiagnostic.git
+cd fidelioDiagnostics
+```
+
+------------------------------------------------------------------------
+
+### 2) Add the GDX files
+
+Inside the repository folder, create a subfolder under `data-raw/gdx/`
+containing your GDX files.  
+These files are **not stored in GitHub**, as they are large model
+outputs.
+
+Example layout:
+
+    data-raw/
+      └── gdx/
+           └── eta_cpi_025_beta_infl_1/
+                ├── baseline.gdx
+                ├── ff55.gdx
+                └── ...
+
+> The default folder name used in the config is
+> `eta_cpi_025_beta_infl_1`,  
+> but you can use any name and update it in `config/project.yml`.
+
+------------------------------------------------------------------------
+
+### 3) Open the R project
+
+Open the RStudio project file to set the working environment:
+
+    fidelioDiagnostic.Rproj
+
+------------------------------------------------------------------------
+
+### 4) Initial configuration
+
+Load the package, load the config, and point `gdxrrw` to your GAMS
+installation.
+
+``` r
+library(fidelioDiagnostics)
+library(gdxrrw)
+
+# Load configuration and print paths
+cfg <- load_config()
+print_runtime_info(cfg)
+
+# Link to your GAMS installation (example path; adapt as needed)
+igdx("C:/GAMS/51")
+```
+
+> Each user must provide their own correct GAMS path in `igdx()`.
+
+------------------------------------------------------------------------
+
+### 5) Create the derived objects
+
+Run the full data processing pipeline to extract, reshape and compute
+all datasets used by the apps:
+
+``` r
+res <- run_pipeline()
+```
+
+This will generate:
+
+- per-symbol files under `outputs/derived/` (format per config),
+- a manifest for lazy loading (`outputs/derived/manifest.rds`),
+- optional bundles (e.g. `bundle_diagnostic_app.rds`,
+  `bundle_results_app.rds`) if configured.
+
+------------------------------------------------------------------------
+
+### 6) Launch the applications
+
+Internal diagnostic app (full dataset):
+
+``` r
+launch_app("diagnostic")
+```
+
+Results app (light, shareable):
+
+``` r
+launch_app("results")
+```
+
+Both apps read from the outputs generated in step 5.
+
+------------------------------------------------------------------------
+
 ## Installation
 
 ``` r
 # install the dev version from GitHub (edit owner/org as needed)
 # install.packages("remotes")
-remotes::install_github("rocchpa/fidelioDiagnostic")
+remotes::install_github("your-org/fidelioDiagnostics")
 ```
 
 For local development:
@@ -52,20 +155,19 @@ groups:
          "SVK","SVN","ESP","SWE","GBR"]
 
 save:
-  formats: ["parquet","feather"]   # per-symbol files
+  formats: ["parquet","feather"]
   bundles:
     diagnostic_app:
       include: ["GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t",
                 "GINV_VAL_t","TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t",
                 "ir_t","P_HH_CPI_t","I_PP_t","K_t","L_t","GHG_t","KLratio_t",
                 "P_Q_t","P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
-
     results_app:
       include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
       filters:
         BITRADE_REG_t:
           keep:
-            c: ["TOT"]             # keep only commodity total
+            c: ["TOT"]
       csv_combine: true
       csv_basename: "results_bundle"
       csv_shape: "wide"
@@ -77,19 +179,9 @@ save:
 
 ``` r
 library(fidelioDiagnostics)
-
-# 1) Load config and print paths
 cfg <- load_config()
 print_runtime_info(cfg)
-
-# 2) Run the pipeline: extract → wide → aggregates → derived → save
 res <- run_pipeline()
-
-# 3) Outputs (by default):
-# - outputs/derived/<symbol>.parquet (and/or .feather/.csv/.rds per config)
-# - outputs/derived/manifest.rds (index for lazy loading in apps)
-# - outputs/derived/bundle_<name>.rds for configured bundles
-# - outputs/derived/results_bundle.csv if enabled for the results bundle
 ```
 
 ------------------------------------------------------------------------
@@ -97,133 +189,27 @@ res <- run_pipeline()
 ## Launch the apps
 
 ``` r
-# Internal diagnostics (full set)
 launch_app("diagnostic")
-
-# Slim results app (subset; uses manifest or bundle_results_app.rds)
 launch_app("results")
 ```
-
-Both apps **lazy-load** tables using `outputs/derived/manifest.rds`. If
-present, they can also load targeted `bundle_*.rds`.
-
-------------------------------------------------------------------------
-
-## What’s produced
-
-- **Nation (n,t)**: `GDPr_t`, `HDY_VAL_t`, `HDYr_t`, `I_TOT_PP_t`,
-  `DS_t`, `FS_t`, `GSUR_VAL_t`, `GINV_VAL_t`, `TBr_t`, `TB_GDP_t`,
-  `HSAVR_t`, `U_t`, `KLratio_country_t`, `ir_t`, `P_HH_CPI_t`.
-- **Industry (n,i,t)**: `I_PP_t`, `K_t`, `L_t`, `GHG_t`, `KLratio_t`,
-  `P_Q_t`, `P_KL_t`, `I_PP_SECT6_t`, `OUT_COMP6_SHARE_REAL_t`.
-- **Bilateral trade (n,n1,c,t)**: `BITRADE_REG_t` (with totals rows
-  appended).
-
-Tables are wide by scenario (`baseline`, `ff55`) and include `delta` and
-`pct` where relevant.
 
 ------------------------------------------------------------------------
 
 ## Developer quick guide (devtools)
 
-### What each command does
-
-- `devtools::document()`  
-  Generate **NAMESPACE** and \*\*man/\*.Rd\*\* from roxygen comments
-  (`#' @export`, `@param`, …).
-
-- `devtools::load_all()`  
-  Load the package **from source** into the current session (no
-  install). Fast feedback loop.
-
-- `devtools::install()`  
-  Build & install into your user library (use in fresh R sessions or
-  scripts).
-
-- `devtools::check()`  
-  Run CRAN-like checks (R CMD check, docs, examples, namespace,
-  DESCRIPTION, etc.).
-
-- `devtools::build()`  
-  Create a source tarball (`.tar.gz`) you can share/install elsewhere.
-
-- `devtools::test()`  
-  Run **testthat** tests under `tests/`.
-
-- `devtools::build_vignettes()` / `devtools::clean_vignettes()`  
-  Build/clean vignettes if you ship them.
-
-- `devtools::build_readme()`  
-  Knit `README.Rmd` → `README.md`.
-
-> **Tip:** If you want roxygen to manage `NAMESPACE`, delete any
-> manually-created `NAMESPACE` and run `devtools::document()`.
-
 ### Common recipes
-
-#### 1) Fast inner dev loop
 
 ``` r
 # edit code in R/*.R
 devtools::load_all()
-
-# if you changed roxygen tags/docs/exports:
 devtools::document()
 devtools::load_all()
-
-# try your functions/apps
 fidelioDiagnostics::run_pipeline()
 fidelioDiagnostics::launch_app("diagnostic")
 ```
 
-#### 2) Install & use in a fresh session
-
-``` r
-devtools::document()
-devtools::install()
-# restart R, then:
-library(fidelioDiagnostics)
-launch_app("results")
-```
-
-#### 3) Pre-commit / pre-share sanity check
-
-``` r
-devtools::document()
-devtools::check()
-```
-
-#### 4) Build a distributable
-
-``` r
-devtools::document()
-devtools::check()
-devtools::build()   # creates fidelioDiagnostics_<version>.tar.gz
-```
-
-#### 5) Shiny app dev loop (recommended)
-
-``` r
-# keep a console open in the package root
-devtools::document()   # only if roxygen changes
-devtools::load_all()
-launch_app("diagnostic")   # or "results"
-```
-
-**Decision mini-tree** - Changed **function code only** →
-`load_all()`.  
-- Changed **roxygen/exports/docs** → `document()` then `load_all()`.  
-- Need to **use in another session** → `install()`.  
-- About to **share** or something fails mysteriously → `check()`.  
-- Need an **archive** → `build()`.
-
 ------------------------------------------------------------------------
-
-## Re-render this README
 
 ``` r
 devtools::build_readme()
 ```
-
-> Commit both `README.Rmd` and the generated `README.md` (plus any
-> figures under `man/figures/`).
