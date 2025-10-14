@@ -43,8 +43,8 @@ Example layout:
     data-raw/
       └── gdx/
            └── eta_cpi_025_beta_infl_1/
-                ├── baseline.gdx
-                ├── ff55.gdx
+                ├── results_all_baseline.gdx
+                ├── results_all_ff55.gdx
                 └── ...
 
 > The default folder name used in the config is
