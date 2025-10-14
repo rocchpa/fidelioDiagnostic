@@ -43,8 +43,8 @@ Example layout:
     data-raw/
       └── gdx/
            └── eta_cpi_025_beta_infl_1/
-                ├── baseline.gdx
-                ├── ff55.gdx
+                ├── results_all_baseline.gdx
+                ├── results_all_ff55.gdx
                 └── ...
 
 > The default folder name used in the config is
@@ -72,7 +72,6 @@ library(gdxrrw)
 
 # Load configuration and print paths
 cfg <- load_config()
-print_runtime_info(cfg)
 
 # Link to your GAMS installation (example path; adapt as needed)
 igdx("C:/GAMS/51")
