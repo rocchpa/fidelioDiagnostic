@@ -118,26 +118,6 @@ Both apps read from the outputs generated in step 5.
 
 ------------------------------------------------------------------------
 
-## Installation
-
-``` r
-# install the dev version from GitHub (edit owner/org as needed)
-# install.packages("remotes")
-remotes::install_github("your-org/fidelioDiagnostics")
-```
-
-For local development:
-
-``` r
-# from package root
-# install.packages("devtools")
-devtools::load_all()      # develop interactively (no install)
-devtools::document()      # update docs/NAMESPACE from roxygen comments
-devtools::install()       # build & install into your R library
-```
-
-------------------------------------------------------------------------
-
 ## Configure
 
 Edit `config/project.yml`. Minimal example:
@@ -175,41 +155,102 @@ save:
 
 ------------------------------------------------------------------------
 
-## Quick start
-
-``` r
-library(fidelioDiagnostics)
-cfg <- load_config()
-print_runtime_info(cfg)
-res <- run_pipeline()
-```
-
-------------------------------------------------------------------------
-
-## Launch the apps
-
-``` r
-launch_app("diagnostic")
-launch_app("results")
-```
-
-------------------------------------------------------------------------
-
 ## Developer quick guide (devtools)
+
+### What each command does
+
+- `devtools::document()`  
+  Generate **NAMESPACE** and \*\*man/\*.Rd\*\* from roxygen comments
+  (`#' @export`, `@param`, …).
+
+- `devtools::load_all()`  
+  Load the package **from source** into the current session (no
+  install). Fast feedback loop.
+
+- `devtools::install()`  
+  Build & install into your user library (use in fresh R sessions or
+  scripts).
+
+- `devtools::check()`  
+  Run CRAN-like checks (R CMD check, docs, examples, namespace,
+  DESCRIPTION, etc.).
+
+- `devtools::build()`  
+  Create a source tarball (`.tar.gz`) you can share/install elsewhere.
+
+- `devtools::test()`  
+  Run **testthat** tests under `tests/`.
+
+- `devtools::build_vignettes()` / `devtools::clean_vignettes()`  
+  Build/clean vignettes if you ship them.
+
+- `devtools::build_readme()`  
+  Knit `README.Rmd` → `README.md`.
+
+> **Tip:** If you want roxygen to manage `NAMESPACE`, delete any
+> manually-created `NAMESPACE` and run `devtools::document()`.
 
 ### Common recipes
 
-``` r
-# edit code in R/*.R
-devtools::load_all()
-devtools::document()
-devtools::load_all()
-fidelioDiagnostics::run_pipeline()
-fidelioDiagnostics::launch_app("diagnostic")
-```
+#### 1) Fast inner dev loop
 
-------------------------------------------------------------------------
+    # edit code in R/*.R
+    devtools::load_all()
 
-``` r
-devtools::build_readme()
-```
+    # if you changed roxygen tags/exports/docs:
+    devtools::document()
+    devtools::load_all()
+
+    # try your functions/pipeline/apps (same session)
+    fidelioDiagnostics::run_pipeline()
+    fidelioDiagnostics::launch_app("diagnostic")  # or "results"
+
+#### 2) Install & use in a fresh session
+
+    devtools::document()
+    devtools::install(upgrade = "never", dependencies = FALSE, build_vignettes = FALSE)
+
+    # restart the R session, then:
+    .rs.restartR(); library(fidelioDiagnostics)
+    fidelioDiagnostics::launch_app("results")
+
+#### 3) Pre-commit / pre-share sanity check
+
+    devtools::document()
+    devtools::check()
+
+#### 4) Build a distributable (source tarball)
+
+    devtools::document()
+    devtools::check()
+    devtools::build()   # creates fidelioDiagnostics_<version>.tar.gz
+
+#### 5) Shiny app dev loop (recommended)
+
+    # keep a console open at the package root
+    devtools::document()   # only when roxygen/exports changed
+    devtools::load_all()
+    fidelioDiagnostics::launch_app("diagnostic")   # or "results"
+
+#### 6) Run the pipeline (reads config/project.yml)
+
+    # no install needed if you only edited YAML
+    fidelioDiagnostics::run_pipeline()
+
+**Decision mini-tree**
+
+- Changed **function code only** → `devtools::load_all()`
+- Changed **roxygen/exports/docs** → `devtools::document()` then
+  `devtools::load_all()`
+- Need to **use in another/new session** →
+  `devtools::install(upgrade = "never", dependencies = FALSE, build_vignettes = FALSE)`
+  then restart + `library(fidelioDiagnostics)`
+- About to **share** or something is flaky → `devtools::check()`
+- Need an **archive** → `devtools::build()`
+
+## Re-render this README
+
+    devtools::build_readme()
+
+> Commit both `README.Rmd` and the generated `README.md` (plus any
+> figures under `man/figures/`).
