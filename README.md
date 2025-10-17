@@ -116,6 +116,9 @@ extract the dataset frin te gdx files.
 library(fidelioDiagnostics)
 library(gdxrrw)
 
+# Other libraries you might need if not already charged
+library(dplyr)
+
 # Load configuration and print paths
 cfg <- load_config()
 
