@@ -12,7 +12,8 @@
 #' @param out_basename file stem for the CSV (default "results_bundle_template").
 #' @param model_name value for the `model` column (default "FIDELIO").
 #' @param pct_as_percent if TRUE, multiplies pct by 100.
-#' @param include_dim_names if TRUE, encode dims as `i=C24|n1=USA`; if FALSE, just `C24|USA`.
+#' @param include_dim_names if TRUE, encode dims as `i=C24|n1=USA`;
+#'   if FALSE (default), encode as `C24|USA` (i.e., no general set prefixes).
 #' @param default_unit default unit string for all symbols except special cases.
 #' @param unit_overrides named list mapping symbol -> unit string (wins over defaults).
 #' @param csv_sep field separator passed to fwrite (use ";" for EU Excel).
@@ -22,7 +23,7 @@ export_results_csv <- function(cfg = NULL,
                                out_basename       = "results_bundle_template",
                                model_name         = "FIDELIO",
                                pct_as_percent     = TRUE,
-                               include_dim_names  = TRUE,
+                               include_dim_names  = FALSE,   # <- default changed
                                default_unit       = "million EUR",
                                unit_overrides     = list(),
                                csv_sep            = ",") {
@@ -82,7 +83,6 @@ export_results_csv <- function(cfg = NULL,
     default_unit
   }
   
-  
   # ---- dims and scenarios ----
   dim_priority <- c("i","c","n1","au","oc")    # 'n' becomes region
   scn_cfg <- cfg$scenarios %||% c("baseline","ff55")
@@ -126,17 +126,34 @@ export_results_csv <- function(cfg = NULL,
     L2[]
   }
   
-  # ---- build PyPSA-like variable string ----
+  # ---- build PyPSA-like variable string (without general set labels) ----
   make_var <- function(symbol, DT) {
     base <- sub("_t$", "", symbol)
     if (!nzchar(base)) base <- as.character(symbol)
-    parts <- character(0)
-    for (d in dim_priority) if (d %in% names(DT)) {
+    
+    # Gather label vectors for each dimension (skip dims not present)
+    lab_list <- lapply(dim_priority, function(d) {
+      if (!d %in% names(DT)) return(NULL)
       vals <- as.character(DT[[d]])
-      lbl  <- if (isTRUE(include_dim_names)) paste0(d, "=", vals) else vals
-      parts <- if (length(parts)) paste(parts, lbl, sep = "|") else lbl
-    }
-    if (!length(parts)) base else paste(base, parts, sep = "|")
+      vals[!nzchar(vals)] <- NA_character_
+      if (isTRUE(include_dim_names)) paste0(d, "=", vals) else vals
+    })
+    
+    # Drop NULL entries (dims not present)
+    lab_list <- lab_list[!vapply(lab_list, is.null, logical(1))]
+    if (!length(lab_list)) return(base)
+    
+    labs_dt <- data.table::as.data.table(lab_list)
+    
+    # For each row, paste only non-NA pieces with "|"
+    parts <- apply(labs_dt, 1L, function(r) {
+      r <- r[!is.na(r)]
+      if (!length(r)) "" else paste(r, collapse = "|")
+    })
+    
+    # Prepend the symbol base; skip empty suffixes
+    out <- ifelse(nchar(parts) == 0L, base, paste(base, parts, sep = "|"))
+    return(out)
   }
   
   # ---- walk bundle, normalize and stack ----
@@ -164,6 +181,7 @@ export_results_csv <- function(cfg = NULL,
     data.table::setcolorder(L, c("model", keep))
     
     rows[[sym]] <- L[]
+    rm(L, W); gc(FALSE)
   }
   
   ALL <- data.table::rbindlist(rows, use.names = TRUE, fill = TRUE)

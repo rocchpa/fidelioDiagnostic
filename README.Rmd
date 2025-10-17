@@ -17,10 +17,13 @@ knitr::opts_chunk$set(
 
 `fidelioDiagnostics` is an R package that:
 
-- extracts **FIDELIO** model results from GDX files,
-- converts them to wide tables and computes **derived indicators** (nation, industry, trade),
-- saves outputs per symbol (Parquet/Feather/…) plus a **manifest** and optional **bundles**,
-- and ships two Shiny apps: an internal **diagnostic** app and a shareable **results** app.
+1 extracts **FIDELIO** model results from GDX files,
+2 converts them to wide tables and computes **derived indicators** (nation, industry, trade),
+3 saves outputs per symbol (Parquet/Feather/…) plus a **manifest** and optional **bundles**,
+4 and ships two Shiny apps: an internal **diagnostic** app and a shareable **results** app.
+
+Points 1 to 3 requires the R library `gdxrrw`, available only with GAMS.
+Point 4 can be run independently, but it requires the .rds files to feed the Shiny apps.
 
 ---
 
@@ -40,7 +43,10 @@ cd fidelioDiagnostics
 
 ---
 
-### 2) Add the GDX files
+### 2) Add the GDX files or the RDS files
+
+GDX files are used to extract new results from the Fidelio gdx output.
+RDS files are used to run the Shiny apps.
 
 Inside the repository folder, create a subfolder under `data-raw/gdx/` containing your GDX files.  
 These files are **not stored in GitHub**, as they are large model outputs.
@@ -59,6 +65,17 @@ data-raw/
 > The default folder name used in the config is `eta_cpi_025_beta_infl_1`,  
 > but you can use any name and update it in `config/project.yml`.
 
+If you don't have GAMS and you want to run directly the Shiny apps,  create a folder under `outputs/derived/` containing your .rds files.
+
+Example layout:
+
+```
+outputs/
+  └── derived/
+       ├── bundle_diagnostic_app.rds
+       ├── bundle_results_app.rds
+       └── ...
+```
 ---
 
 ### 3) Open the R project
@@ -73,7 +90,38 @@ fidelioDiagnostic.Rproj
 
 ### 4) Initial configuration
 
-Load the package, load the config, and point `gdxrrw` to your GAMS installation.
+Depending on whether you are using the package **for the first time** or **after installation**, 
+follow one of the two options below.
+
+
+#### **Option A — First-time setup (new user or fresh clone)**
+
+When you clone the repository for the first time, the package is not yet installed on your machine.  
+Follow these steps **once** to install it and its dependencies.
+
+
+```{r, eval=FALSE}
+# 1. Install devtools (if not already installed)
+install.packages("devtools")
+
+# 2. Install all dependencies listed in DESCRIPTION
+devtools::install_deps(dependencies = TRUE)
+
+# 3. Generate documentation (only needed if NAMESPACE/man are not included)
+devtools::document()
+
+# 4. Install the package locally
+devtools::install(upgrade = "never", dependencies = FALSE, build_vignettes = FALSE)
+
+# 5. Load it
+library(fidelioDiagnostics)
+```
+
+
+#### **Option B —Subsequent uses (package already installed)**
+
+If the package is already installed, simply load it and, if needed, point `gdxrrw` to your GAMS installation. Library `gdxrrw` should be loaded only if you are going to run the full data processing 
+pipeline to extract the dataset frin te gdx files.
 
 ```{r, eval=FALSE}
 library(fidelioDiagnostics)

@@ -10,7 +10,7 @@ export_results_csv(
   out_basename = "results_bundle_template",
   model_name = "FIDELIO",
   pct_as_percent = TRUE,
-  include_dim_names = TRUE,
+  include_dim_names = FALSE,
   default_unit = "million EUR",
   unit_overrides = list(),
   csv_sep = ","
@@ -28,7 +28,8 @@ the function will call load_config() for you (robust to empty default.yml).}
 
 \item{pct_as_percent}{if TRUE, multiplies pct by 100.}
 
-\item{include_dim_names}{if TRUE, encode dims as \code{i=C24|n1=USA}; if FALSE, just \code{C24|USA}.}
+\item{include_dim_names}{if TRUE, encode dims as \code{i=C24|n1=USA};
+if FALSE (default), encode as \code{C24|USA} (i.e., no general set prefixes).}
 
 \item{default_unit}{default unit string for all symbols except special cases.}
 
