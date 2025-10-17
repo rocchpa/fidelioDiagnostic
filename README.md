@@ -5,11 +5,13 @@
 
 `fidelioDiagnostics` is an R package that:
 
-1 extracts **FIDELIO** model results from GDX files, 2 converts them to
-wide tables and computes **derived indicators** (nation, industry,
-trade), 3 saves outputs per symbol (Parquet/Feather/…) plus a
-**manifest** and optional **bundles**, 4 and ships two Shiny apps: an
-internal **diagnostic** app and a shareable **results** app.
+- extracts **FIDELIO** model results from GDX files,
+- converts them to wide tables and computes **derived indicators**
+  (nation, industry, trade),
+- saves outputs per symbol (Parquet/Feather/…) plus a **manifest** and
+  optional **bundles**,
+- and ships two Shiny apps: an internal **diagnostic** app and a
+  shareable **results** app.
 
 Points 1 to 3 requires the R library `gdxrrw`, available only with GAMS.
 Point 4 can be run independently, but it requires the .rds files to feed
@@ -115,9 +117,6 @@ extract the dataset frin te gdx files.
 ``` r
 library(fidelioDiagnostics)
 library(gdxrrw)
-
-# Other libraries you might need if not already charged
-library(dplyr)
 
 # Load configuration and print paths
 cfg <- load_config()
