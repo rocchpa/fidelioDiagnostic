@@ -2,7 +2,12 @@ paths:
   gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
   outputs: "outputs"
 
-scenarios: ["baseline","ff55"]
+scenarios:
+  - baseline
+  - ff55
+  # add more later, e.g.
+  # - cbam
+  # - nze
 
 groups:
   EU28: ["AUT","BEL","BGR","HRV","CYP","CZE","DNK","EST","FIN","FRA","DEU","GRC",

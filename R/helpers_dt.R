@@ -21,15 +21,29 @@ norm_key_types <- function(DT) {
   DT
 }
 
-# >>> add delta (pol - base) and pct ((pol/base)-1) and reorder columns --------
-add_var_cols <- function(DT, base = "baseline", pol = "ff55") {
+# >>> add delta (pol - base) and pct ((pol/base) - 1) and reorder columns ----
+add_var_cols <- function(DT, base = NULL, pol = NULL, cfg = NULL) {
   if (is.null(DT)) return(NULL)
-  DT <- norm_key_types(DT)
-  if (!all(c(base, pol) %in% names(DT))) return(DT)
+  data.table::setDT(DT)
+
+  # read names from cfg if not provided
+  if (is.null(cfg)) cfg <- load_config()
+  if (is.null(base)) base <- fidelioDiagnostics:::base_scn(cfg)
+  if (is.null(pol))  pol  <- fidelioDiagnostics:::policy_scns(cfg)[1]
+
+  # if no policy scenario configured/present, return as-is
+  if (is.na(pol) || !all(c(base, pol) %in% names(DT))) return(DT[])
+
+  # compute delta / pct safely
   DT[, `:=`(
     delta = get(pol) - get(base),
-    pct   = data.table::fifelse(is.na(get(base)) | get(base) == 0, NA_real_, (get(pol)/get(base)) - 1)
+    pct   = data.table::fifelse(
+      is.na(get(base)) | get(base) == 0, NA_real_,
+      (get(pol) / get(base)) - 1
+    )
   )]
+
+  # tidy column order
   key_cols <- setdiff(names(DT), c(base, pol, "delta", "pct"))
   data.table::setcolorder(DT, c(key_cols, base, pol, "delta", "pct"))
   DT[]
@@ -37,7 +51,9 @@ add_var_cols <- function(DT, base = "baseline", pol = "ff55") {
 
 # >>> compute value = price * quantity, then sum by keys for given scenarios----
 sum_value_by <- function(priceDT, qtyDT, by = c("n","t"), filter = NULL,
-                         scenarios = c("baseline","ff55")) {
+                          scenarios = NULL, cfg = NULL) {
+  cfg <- .get_cfg(cfg)
+  if (is.null(scenarios)) scenarios <- cfg$scenarios
   if (is.null(priceDT) || is.null(qtyDT)) return(NULL)
   P <- norm_key_types(data.table::copy(priceDT))
   Q <- norm_key_types(data.table::copy(qtyDT))
@@ -49,7 +65,9 @@ sum_value_by <- function(priceDT, qtyDT, by = c("n","t"), filter = NULL,
     }
   }
   
-  scn_cols  <- c("baseline","ff55","delta","pct")
+ # scenario columns present in price/qty tables (from YAML) + derived cols
+scn_cols <- c(cfg$scenarios, "delta", "pct")
+
   join_keys <- intersect(setdiff(names(P), scn_cols), setdiff(names(Q), scn_cols))
   if (!all(by %in% join_keys)) by <- intersect(by, join_keys)
   if (length(join_keys) == 0L) return(NULL)
@@ -73,7 +91,9 @@ sum_value_by <- function(priceDT, qtyDT, by = c("n","t"), filter = NULL,
 
 # >>> add EU28, NonEU28,and WORLD rows by summing additive variables over'n'----
 add_macroregions_additive <- function(DT, eu_members,
-                                      scenarios = c("baseline","ff55")) {
+                                      scenarios = NULL, cfg = NULL) {
+  cfg <- .get_cfg(cfg)
+  if (is.null(scenarios)) scenarios <- cfg$scenarios
   if (is.null(DT) || !"n" %in% names(DT)) return(DT)
   DT <- norm_key_types(DT)
   

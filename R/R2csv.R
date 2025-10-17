@@ -34,13 +34,16 @@ export_results_csv <- function(cfg = NULL,
   `%||%` <- function(x, y) if (is.null(x)) y else x
   
   # ---- config (robust) ----
-  if (is.null(cfg) || is.character(cfg)) {
-    cfg <- tryCatch(load_config(), error = function(e) NULL)
-    if (is.null(cfg)) {
-      cfg <- list(paths = list(outputs = normalizePath("outputs", mustWork = FALSE)),
-                  scenarios = c("baseline","ff55"))
-    }
-  }
+if (is.null(cfg) || is.character(cfg)) {
+  cfg <- tryCatch(load_config(), error = function(e) NULL)
+}
+if (is.null(cfg)) {
+  stop("export_results_csv(): cannot load config; pass cfg or fix load_config().")
+}
+if (is.null(cfg$scenarios) || length(cfg$scenarios) < 1) {
+  stop("export_results_csv(): cfg$scenarios missing or empty; set it in YAML.")
+}
+
   
   # Prefer explicit path from cfg; fall back to helper if needed
   outdir <- tryCatch(file.path(cfg$paths$outputs, "derived"),
@@ -85,28 +88,34 @@ export_results_csv <- function(cfg = NULL,
   
   # ---- dims and scenarios ----
   dim_priority <- c("i","c","n1","au","oc")    # 'n' becomes region
-  scn_cfg <- cfg$scenarios %||% c("baseline","ff55")
+  scn_cfg <- cfg$scenarios
+stopifnot(length(scn_cfg) >= 1)
+
   
   # ---- normalize wide -> long (scenario) ----
-  to_long_scn <- function(DT) {
-    data.table::setDT(DT)
-    meas_wide <- intersect(names(DT), c(scn_cfg, "baseline", "ff55"))
-    if (length(meas_wide) >= 1L) {
-      id_cols <- setdiff(names(DT), c(meas_wide, "delta", "pct"))
-      L <- data.table::melt(DT, id.vars = id_cols,
-                            measure.vars = meas_wide,
-                            variable.name = "scenario",
-                            value.name    = "value")
-    } else if (all(c("scenario","value") %in% names(DT))) {
-      L <- data.table::copy(DT)
-    } else {
-      stop("Cannot normalize table; expected either wide (scenario columns) or long (scenario/value).")
-    }
-    if ("t" %in% names(L) && !"year" %in% names(L)) {
-      L[, year := 2014L + as.integer(t)]
-    }
-    L[]
+to_long_scn <- function(DT, cfg = NULL) {
+  data.table::setDT(DT)
+  if (is.null(cfg)) cfg <- load_config()
+  scn_cfg <- cfg$scenarios
+  stopifnot(length(scn_cfg) >= 1)
+
+  meas_wide <- intersect(names(DT), scn_cfg)
+  if (length(meas_wide) >= 1L) {
+    id_cols <- setdiff(names(DT), c(meas_wide, "delta", "pct"))
+    L <- data.table::melt(
+      DT, id.vars = id_cols,
+      measure.vars = meas_wide,
+      variable.name = "scenario",
+      value.name = "value"
+    )
+  } else if (all(c("scenario","value") %in% names(DT))) {
+    L <- data.table::copy(DT)
+  } else {
+    stop("Cannot normalize table: expected either wide (scenario columns) or long (scenario/value).")
   }
+  L[]
+}
+
   
   # ---- attach pct_change from wide 'pct' if present ----
   attach_pct <- function(W, L) {

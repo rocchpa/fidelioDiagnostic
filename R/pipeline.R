@@ -50,30 +50,54 @@ run_pipeline <- function(config = "config/project.yml") {
       if (!length(key_cols)) key_cols <- character(0)
     }
     
-    # A) already wide (baseline/ff55 present)
-    if (all(c("baseline","ff55") %in% names(DT))) {
-      if (!"delta" %in% names(DT)) DT[, delta := ff55 - baseline]
-      if (!"pct"   %in% names(DT)) DT[,  pct  := data.table::fifelse(abs(baseline) > .Machine$double.eps,
-                                                                     delta / baseline, NA_real_)]
-      return(DT[])
-    }
+    # A) already wide (baseline/policy present)
+b  <- fidelioDiagnostics:::base_scn()
+p1 <- fidelioDiagnostics:::policy_scns()[1]
+
+if (!is.na(p1) && all(c(b, p1) %in% names(DT))) {
+  if (!"delta" %in% names(DT)) {
+    DT[, delta := get(p1) - get(b)]
+  }
+  if (!"pct" %in% names(DT)) {
+    DT[, pct := data.table::fifelse(abs(get(b)) > .Machine$double.eps,
+                                    delta / get(b), NA_real_)]
+  }
+  return(DT[])
+}
     
-    # B) long (scenario/value) -> promote to wide
-    need <- c(key_cols, "scenario", "value")
-    if (all(need %in% names(DT))) {
-      W <- data.table::dcast(DT,
-                             as.formula(paste(paste(key_cols, collapse = " + "), "~ scenario")),
-                             value.var = "value")
-      # Normalize scenario names if necessary
-      sc_other <- setdiff(names(W), c(key_cols, "delta","pct"))
-      if (!all(c("baseline","ff55") %in% names(W)) && length(sc_other) >= 2)
-        data.table::setnames(W, sc_other[1:2], c("baseline","ff55"))
-      W <- W[!is.na(baseline) & !is.na(ff55)]
-      W[, delta := ff55 - baseline]
-      W[,  pct  := data.table::fifelse(abs(baseline) > .Machine$double.eps,
-                                       delta / baseline, NA_real_)]
-      return(W[])
-    }
+# B) long (scenario/value) -> promote to wide
+need <- c(key_cols, "scenario", "value")
+if (all(need %in% names(DT))) {
+  W <- data.table::dcast(
+    DT,
+    as.formula(paste(paste(key_cols, collapse = " + "), "~ scenario")),
+    value.var = "value"
+  )
+
+  # --- compute delta/pct using cfg scenario names (no renaming) ---
+  cfg <- fidelioDiagnostics:::load_config()
+  b   <- fidelioDiagnostics:::base_scn(cfg)
+  ps  <- fidelioDiagnostics:::policy_scns(cfg)
+  if (length(ps) < 1L) return(W[])   # no policy scenario; nothing to do
+  p1  <- ps[1]
+
+  # if the exact policy name isn't present, fall back to "first non-baseline" scenario present
+  sc_cols <- intersect(names(W), cfg$scenarios)
+  if (!b %in% sc_cols) return(W[])
+  pcol <- if (p1 %in% sc_cols) p1 else setdiff(sc_cols, b)[1]
+  if (is.na(pcol) || !pcol %in% names(W)) return(W[])
+
+  W <- W[!is.na(get(b)) & !is.na(get(pcol))]
+  if (!"delta" %in% names(W)) {
+    W[, delta := get(pcol) - get(b)]
+  }
+  if (!"pct" %in% names(W)) {
+    W[, pct := data.table::fifelse(abs(get(b)) > .Machine$double.eps,
+                                   delta / get(b), NA_real_)]
+  }
+  return(W[])
+}
+
     
     # otherwise leave as-is
     DT[]
