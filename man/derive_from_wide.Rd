@@ -2,7 +2,7 @@
 % Please edit documentation in R/derive_indicators.R
 \name{derive_from_wide}
 \alias{derive_from_wide}
-\title{Compute all derived indicators that were previously built from wide tables}
+\title{Build derived tables from wide (results_by_symbol)}
 \usage{
 derive_from_wide(rs, cfg)
 }
@@ -12,8 +12,8 @@ derive_from_wide(rs, cfg)
 \item{cfg}{config (for scenarios + EU28)}
 }
 \value{
-named list of wide data.tables
+named list of wide data.tables (all scenarios kept)
 }
 \description{
-Compute all derived indicators that were previously built from wide tables
+Build derived tables from wide (results_by_symbol)
 }

@@ -5,16 +5,25 @@
 #' Run the end-to-end pipeline: extract → wide → aggregates → deltas → derived → save
 #' @export
 run_pipeline <- function(config = "config/project.yml") {
+  # --- config & runtime --------------------------------------------------------
   cfg <- if (is.list(config)) config else load_config()
   print_runtime_info(cfg)
   
-  # 1) what to extract
+  # convenience
+  scenarios <- cfg$scenarios
+  if (is.null(scenarios) || length(scenarios) == 0L) {
+    stop("cfg$scenarios is empty. Ensure YAML defines 'scenarios:' with baseline first.")
+  }
+  base_scn <- scenarios[1]
+  pol_scns <- scenarios[-1]
+  
+  # --- 1) what to extract ------------------------------------------------------
   reg <- plan_extractions(cfg)
   
-  # 2) extract long (dims + scenario + value)
+  # --- 2) extract long (dims + scenario + value) -------------------------------
   raw <- extract_all(cfg, reg)
   
-  # 3) wide with aggregates + Δ/%  (this reproduces your results_by_symbol)
+  # --- 3) wide with aggregates + Δ/%  (build results_by_symbol) ----------------
   additive_syms <- tryCatch(cfg$aggregations$additive_symbols, error = function(e) NULL)
   if (is.null(additive_syms)) {
     additive_syms <- c(
@@ -24,24 +33,36 @@ run_pipeline <- function(config = "config/project.yml") {
       "P_USE_t","P_Mcif_t","P_I_t","P_Q_t","P_INPUT_t"
     )
   }
-  base_scn <- cfg$scenarios[1]; pol_scn <- cfg$scenarios[length(cfg$scenarios)]
   
   postproc <- function(dt, name) {
     if (is.null(dt) || !nrow(dt)) return(NULL)
-    w <- wide_by_scenario(dt, cfg$scenarios)
+    
+    # wide per scenario
+    w <- wide_by_scenario(dt, scenarios = cfg$scenarios, cfg = cfg)
+    
+    # optional macro-regions for additive symbols with 'n'
     if ("n" %in% names(w) && name %in% additive_syms && !is.null(cfg$groups$EU28)) {
-      w <- add_macroregions_additive(w, eu_members = cfg$groups$EU28, scenarios = cfg$scenarios)
+      w <- add_macroregions_additive(w, eu_members = cfg$groups$EU28, scenarios = cfg$scenarios, cfg = cfg)
     }
-    add_var_cols(w, base = base_scn, pol = pol_scn)
+    
+    # multi-policy deltas/% (no-op if there are no policy scenarios)
+    if (length(pol_scns)) {
+      w <- add_var_cols_multi(w, base = base_scn, policies = pol_scns, cfg = cfg)
+    }
+    
+    w[]
   }
+  
   results_by_symbol <- lapply(names(raw), function(sym) postproc(raw[[sym]], sym))
   names(results_by_symbol) <- names(raw)
   
-  # 4) your “derived from wide” block
+  # --- 4) derived from wide ----------------------------------------------------
   derived <- derive_from_wide(results_by_symbol, cfg)
+  
   # ---------- Generic promoter: base -> derived (config driven) ----------
   # Coerce to derived (wide) shape when needed
   ensure_derived_shape <- function(DT, key_cols = NULL) {
+    if (is.null(DT)) return(DT)
     DT <- data.table::as.data.table(DT)
     
     # auto-detect keys if not given
@@ -50,60 +71,46 @@ run_pipeline <- function(config = "config/project.yml") {
       if (!length(key_cols)) key_cols <- character(0)
     }
     
-    # A) already wide (baseline/policy present)
-b  <- fidelioDiagnostics:::base_scn()
-p1 <- fidelioDiagnostics:::policy_scns()[1]
-
-if (!is.na(p1) && all(c(b, p1) %in% names(DT))) {
-  if (!"delta" %in% names(DT)) {
-    DT[, delta := get(p1) - get(b)]
-  }
-  if (!"pct" %in% names(DT)) {
-    DT[, pct := data.table::fifelse(abs(get(b)) > .Machine$double.eps,
-                                    delta / get(b), NA_real_)]
-  }
-  return(DT[])
-}
+    # A) already wide (has scenario columns)
+    sc_cols_present <- intersect(names(DT), cfg$scenarios)
+    if (length(sc_cols_present) >= 1L) {
+      # compute multi deltas/% for ALL available policy columns (in cfg order)
+      base <- base_scn
+      if (base %in% sc_cols_present && length(pol_scns)) {
+        policies_here <- intersect(pol_scns, sc_cols_present)
+        if (length(policies_here)) {
+          add_var_cols_multi(DT, base = base, policies = policies_here, cfg = cfg)
+        }
+      }
+      return(DT[])
+    }
     
-# B) long (scenario/value) -> promote to wide
-need <- c(key_cols, "scenario", "value")
-if (all(need %in% names(DT))) {
-  W <- data.table::dcast(
-    DT,
-    as.formula(paste(paste(key_cols, collapse = " + "), "~ scenario")),
-    value.var = "value"
-  )
-
-  # --- compute delta/pct using cfg scenario names (no renaming) ---
-  cfg <- fidelioDiagnostics:::load_config()
-  b   <- fidelioDiagnostics:::base_scn(cfg)
-  ps  <- fidelioDiagnostics:::policy_scns(cfg)
-  if (length(ps) < 1L) return(W[])   # no policy scenario; nothing to do
-  p1  <- ps[1]
-
-  # if the exact policy name isn't present, fall back to "first non-baseline" scenario present
-  sc_cols <- intersect(names(W), cfg$scenarios)
-  if (!b %in% sc_cols) return(W[])
-  pcol <- if (p1 %in% sc_cols) p1 else setdiff(sc_cols, b)[1]
-  if (is.na(pcol) || !pcol %in% names(W)) return(W[])
-
-  W <- W[!is.na(get(b)) & !is.na(get(pcol))]
-  if (!"delta" %in% names(W)) {
-    W[, delta := get(pcol) - get(b)]
-  }
-  if (!"pct" %in% names(W)) {
-    W[, pct := data.table::fifelse(abs(get(b)) > .Machine$double.eps,
-                                   delta / get(b), NA_real_)]
-  }
-  return(W[])
-}
-
+    # B) long (scenario/value) -> promote to wide
+    need <- c(key_cols, "scenario", "value")
+    if (all(need %in% names(DT))) {
+      W <- data.table::dcast(
+        DT,
+        as.formula(paste(paste(key_cols, collapse = " + "), "~ scenario")),
+        value.var = "value", fill = NA_real_
+      )
+      
+      # compute multi deltas/% using available scenario columns
+      sc_cols_present <- intersect(names(W), cfg$scenarios)
+      if (base_scn %in% sc_cols_present && length(pol_scns)) {
+        policies_here <- intersect(pol_scns, sc_cols_present)
+        if (length(policies_here)) {
+          add_var_cols_multi(W, base = base_scn, policies = policies_here, cfg = cfg)
+        }
+      }
+      return(W[])
+    }
     
     # otherwise leave as-is
     DT[]
   }
   
   # Read config lists (with safe defaults)
+  `%||%` <- function(a, b) if (is.null(a)) b else a
   incl <- try(cfg$derive$include_from_base, silent = TRUE)
   if (inherits(incl, "try-error") || is.null(incl)) incl <- character(0)
   
@@ -125,30 +132,27 @@ if (all(need %in% names(DT))) {
     if (!is.null(Dd) && nrow(Dd)) derived[[nm]] <- Dd
   }
   
-  # 5) save
+  # --- 5) save -----------------------------------------------------------------
   save_artifacts(results_by_symbol, cfg, subdir = "base")
   if (length(derived)) save_artifacts(derived, cfg, subdir = "derived")
   
   message("Built results_by_symbol: ", paste(names(results_by_symbol), collapse = ", "))
   if (length(derived)) message("Built derived: ", paste(names(derived), collapse = ", "))
   
-  invisible(list(cfg = cfg, raw = raw, results_by_symbol = results_by_symbol, derived = derived))
-  
-  
-  # Optional CSV exporter (reads the saved bundle)
+  # --- 6) Optional CSV export (runs now, before returning) ---------------------
   if (isTRUE(cfg$export_csv$enabled)) {
+    bundle_name <- if (!is.null(cfg$save$bundles$results_app)) cfg$save$bundles$results_app else "results_app"
     export_results_csv(
-      cfg            = cfg,
-      bundle_name    = cfg$save$bundles$results_app %>% { if (length(.) ) "results_app" else "results_app" },
-      out_basename   = cfg$export_csv$out_basename %||% "results_bundle_template",
-      model_name     = cfg$export_csv$model_name    %||% "FIDELIO",
-      pct_as_percent = isTRUE(cfg$export_csv$pct_as_percent),
+      cfg               = cfg,
+      bundle_name       = bundle_name,
+      out_basename      = cfg$export_csv$out_basename   %||% "results_bundle_template",
+      model_name        = cfg$export_csv$model_name     %||% "FIDELIO",
+      pct_as_percent    = isTRUE(cfg$export_csv$pct_as_percent),
       include_dim_names = isTRUE(cfg$export_csv$include_dim_names),
-      unit_overrides = cfg$export_csv$unit_overrides %||% list()
+      unit_overrides    = cfg$export_csv$unit_overrides %||% list()
     )
   }
   
-  
-  
-  
+  # --- return ------------------------------------------------------------------
+  invisible(list(cfg = cfg, raw = raw, results_by_symbol = results_by_symbol, derived = derived))
 }

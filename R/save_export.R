@@ -2,6 +2,32 @@
 # ====                          save_export                             ========
 # ==============================================================================
 
+# ---- tiny safe infix ----------------------------------------------------------
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+# ---- internal helpers ---------------------------------------------------------
+.sanitize_id <- function(x) {
+  x <- gsub("[^A-Za-z0-9._-]+", "-", x)
+  x <- gsub("-+", "-", x)
+  x <- gsub("(^-|-$)", "", x)
+  tolower(x)
+}
+.project_id <- function(cfg) {
+  pid <- try(cfg$project$id, silent = TRUE)
+  if (!inherits(pid, "try-error") && !is.null(pid) && nzchar(pid)) {
+    return(.sanitize_id(pid))
+  }
+  # fallback: derive from gdx_dir basename
+  gd <- try(cfg$paths$gdx_dir, silent = TRUE)
+  if (!inherits(gd, "try-error") && !is.null(gd) && nzchar(gd)) {
+    return(.sanitize_id(basename(gd)))
+  }
+  "project"
+}
+.ts_stamp <- function() {
+  # yyyy-mm-dd_HH-MM-SS (local time)
+  format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
+}
 
 #' Save a named list of data.tables according to config
 #' @export
@@ -35,7 +61,7 @@ save_artifacts <- function(objs, cfg, subdir = NULL) {
     }
   }
   man <- make_manifest(objs, outdir)                 # index for lazy loading in Shiny
-  make_bundles(objs, outdir, cfg$save$bundles)       # selective bundles + combined CSVs
+  make_bundles(objs, outdir, cfg$save$bundles, cfg)  # selective bundles + combined CSVs
   
   invisible(outdir)
 }
@@ -81,23 +107,23 @@ apply_filters <- function(DT, filt) {
 norm_for_csv <- function(DT, symbol, prefer = c("baseline","ff55","delta","pct")) {
   dims_all <- c("n","n1","i","c","au","oc","t")
   D <- data.table::as.data.table(DT)
-  # make sure these columns exist (else add as NA)
   for (k in dims_all) if (!k %in% names(D)) D[, (k) := NA]
-  # ensure preferred measure columns exist if present in any DTs
   meas <- intersect(prefer, names(D))
   D[, symbol := symbol]
-  # order columns: symbol, dims, then measures present
   data.table::setcolorder(D, c("symbol", dims_all, meas))
   D[]
 }
 
 # --- write selective bundles (and optional combined CSV) ----------------------
-make_bundles <- function(objs, outdir, bundles_spec) {
+make_bundles <- function(objs, outdir, bundles_spec, cfg) {
   if (is.null(bundles_spec) || !length(bundles_spec)) return(invisible(NULL))
+  
+  pid <- .project_id(cfg)
+  ts  <- .ts_stamp()
   
   for (bn in names(bundles_spec)) {
     spec <- bundles_spec[[bn]]
-    inc  <- spec$include %||% character(0)  # small infix helper below
+    inc  <- spec$include %||% character(0)
     sel  <- intersect(inc, names(objs))
     if (!length(sel)) next
     
@@ -109,25 +135,23 @@ make_bundles <- function(objs, outdir, bundles_spec) {
     })
     names(filtered) <- sel
     
-    # save RDS bundle
-    saveRDS(filtered, file.path(outdir, paste0("bundle_", bn, ".rds")))
+    # --- save RDS bundle with project+timestamp suffix AND a latest copy -------
+    versioned <- file.path(outdir, sprintf("bundle_%s_%s_%s.rds", bn, pid, ts))
+    latest    <- file.path(outdir, sprintf("bundle_%s_%s_latest.rds", bn, pid))
     
-    # optional combined CSV (wide or long)
+    saveRDS(filtered, versioned)
+    file.copy(from = versioned, to = latest, overwrite = TRUE, copy.mode = TRUE)
+    
+    # optional combined CSV (keep naming consistent with single underscores)
     if (isTRUE(spec$csv_combine)) {
       shape <- tolower(spec$csv_shape %||% "wide")
-      if (shape == "long" && all(vapply(filtered, function(x) all(c("scenario","value") %in% names(x)), TRUE))) {
-        # already in long; just pad + stack
-        pieces <- mapply(norm_for_csv, filtered, names(filtered), SIMPLIFY = FALSE)
-      } else {
-        # wide (baseline/ff55/delta/pct); pad dims + stack
-        pieces <- mapply(norm_for_csv, filtered, names(filtered), SIMPLIFY = FALSE)
-      }
-      all_dt <- data.table::rbindlist(pieces, use.names = TRUE, fill = TRUE)
-      data.table::fwrite(all_dt, file.path(outdir, paste0(spec$csv_basename %||% bn, ".csv")))
+      pieces <- mapply(norm_for_csv, filtered, names(filtered), SIMPLIFY = FALSE)
+      csv_name <- spec$csv_basename %||% bn
+      csv_path <- file.path(outdir, sprintf("%s_%s_%s.csv", csv_name, pid, ts))
+      data.table::fwrite(data.table::rbindlist(pieces, use.names = TRUE, fill = TRUE), csv_path)
     }
+    
   }
   
   invisible(NULL)
 }
-
-`%||%` <- function(x, y) if (is.null(x)) y else x

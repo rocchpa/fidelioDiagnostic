@@ -1,3 +1,7 @@
+project:
+  id: "ff55_3scn"   # short, file-system-friendly
+  # If omitted, we'll fall back to the basename of paths$gdx_dir
+
 paths:
   gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
   outputs: "outputs"
@@ -5,6 +9,7 @@ paths:
 scenarios:
   - baseline
   - ff55
+  - ff55_2
   # add more later, e.g.
   # - cbam
   # - nze
