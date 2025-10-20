@@ -168,37 +168,185 @@ Both apps read from the outputs generated in step 5.
 
 ## Configure
 
-Edit `config/project.yml`. Minimal example:
+Before running either **results extraction** or **results
+visualization**, the package must be configured through the file:
+
+config/project.yml
+
+This file tells the package where to find input data, which scenarios to
+process, what variables to extract from the model, and how to save the
+outputs. You can edit it with any text editor or directly within
+RStudio.
+
+------------------------------------------------------------------------
+
+### What you need to configure
+
+**1. Project identification**  
+- `project.id` – short, file-system-friendly identifier for the run
+(used in filenames).  
+Example: project: id: “ff55_3scn”
+
+**2. Paths**  
+- `paths.gdx_dir` – path to the folder containing your **FIDELIO GDX**
+files (or subfolders).  
+- `paths.outputs` – path to the folder where all derived data and
+bundles will be written.  
+Example: paths: gdx_dir: “data-raw/gdx/eta_cpi_025_beta_infl_1” outputs:
+“outputs”
+
+**3. Scenarios**  
+- `scenarios` – list of scenario names to be processed (these must match
+the scenario identifiers used in your GDX/manifests).  
+Example: scenarios: - baseline - ff55 - ff55_2
+
+**4. Regional groups (optional)**  
+- `groups` – define sets of countries or regions for aggregation or
+plotting.  
+Example: groups: EU28:
+\[“AUT”,“BEL”,“BGR”,“HRV”,“CYP”,“CZE”,“DNK”,“EST”,“FIN”,“FRA”,“DEU”,“GRC”,“HUN”,“IRL”,“ITA”,“LVA”,“LTU”,“LUX”,“MLT”,“NLD”,“POL”,“PRT”,“ROU”,“SVK”,“SVN”,“ESP”,“SWE”,“GBR”\]
+
+**5. Variables to extract**  
+- `extract.include` – list of model **symbols** to read from the GDX
+files (e.g., `GDPr_t`, `U_t`, `BITRADE_t`, `GHG_t`). Add or remove items
+here to control what gets imported.
+
+**6. Aggregation settings**  
+- `aggregations.additive_symbols` – list of variables that can be safely
+**summed** (e.g., activity levels like GDP, emissions, trade). Avoid
+listing non-additive variables (prices, indices, ratios).
+
+**7. Output formats and bundles**  
+- `save.formats` – which output file types to generate (e.g., `parquet`,
+`feather`, optionally `csv`, `fst`, `rds`).  
+- `save.bundles` – define custom bundles for apps/exports: -
+`diagnostic_app.include` – variables for the diagnostics dashboard.  
+- `results_app.include` – variables for the results dashboard.  
+Optional bundle options:  
+- `filters` – selection rules to reduce size (e.g., under
+`BITRADE_REG_t`, keep only `c: ["TOT"]`).  
+- `csv_combine`, `csv_basename`, `csv_shape` – CSV preferences per
+bundle.
+
+**8. Derived indicators**  
+- `derive.include_from_base` – base variables to promote to derived if
+missing.  
+- Optionally set `derive.keys` to control long→wide reshaping per
+symbol.
+
+**9. Final CSV export (optional)**  
+- `export_csv` – automatically generate a single shareable CSV from a
+selected bundle. Key options:  
+- `enabled`: whether to export.  
+- `bundle`: which bundle to export (e.g., `results_app`).  
+- `out_basename`: base filename in `outputs/derived/`.  
+- `model_name`: model label for metadata.  
+- `pct_as_percent`: express percentage changes as `%`.  
+- `include_dim_names`: include dimension names in headers.  
+- `unit_overrides`: assign custom units to variables.  
+Example: export_csv: enabled: true bundle: “results_app” out_basename:
+“results_bundle_template” model_name: “FIDELIO” pct_as_percent: true
+include_dim_names: true unit_overrides: GDPr_t: “real (base=2014)”
+TB_GDP_t: “ratio” I_PP_SECT6_t: “PP units”
+
+------------------------------------------------------------------------
+
+### Typical workflow
+
+1)  Set the project id (i.e. acronym for current analysis)
+2)  Set your GDX folder and scenarios in `paths.gdx_dir` and
+    `scenarios`.  
+3)  Check that all required variables are listed under
+    `extract.include`.  
+4)  Adjust bundles under `save.bundles` to match what each app
+    expects.  
+5)  (Optional) Define `groups` and `aggregations.additive_symbols` if
+    you will aggregate.  
+6)  (Optional) Enable `export_csv` if you need a ready-to-share CSV.
+
+Once the configuration file is correctly set, you can run the pipeline
+or launch the Shiny apps; the package will automatically use this
+configuration.
+
+------------------------------------------------------------------------
+
+### Example of `config/project.yml`:
 
 ``` yaml
+project:
+  id: "ff55_3scn"   # short, file-system-friendly
+  # If omitted, we'll fall back to the basename of paths$gdx_dir
+
 paths:
   gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
   outputs: "outputs"
 
-scenarios: ["baseline","ff55"]
+scenarios:
+  - baseline
+  - ff55
+  - ff55_2
+  # add more later, e.g.
+  # - cbam
+  # - nze
 
 groups:
   EU28: ["AUT","BEL","BGR","HRV","CYP","CZE","DNK","EST","FIN","FRA","DEU","GRC",
-         "HUN","IRL","ITA","LVA","LTU","LUX","MLT","NLD","POL","PRT","ROU",
-         "SVK","SVN","ESP","SWE","GBR"]
+         "HUN","IRL","ITA","LVA","LTU","LUX","MLT","NLD","POL","PRT","ROU","SVK",
+         "SVN","ESP","SWE","GBR"]
+
+extract:
+  include: ["GDPr_t","HSAVR_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
+            "Q_t","I_PP_t","P_I_t","K_t","L_t","U_t","P_CPI_t","ir_t",
+            "P_INPUT_t","P_Q_t","USE_PP_t","M_TOT_t","P_USE_t","P_Mcif_t",
+            "BITRADE_t","GHG_t"]
+
+aggregations:
+  additive_symbols: ["GDPr_t","HDY_VAL_t","GSUR_VAL_t","GINV_VAL_t",
+                     "Q_t","I_PP_t","K_t","L_t","U_t",
+                     "USE_PP_t","M_TOT_t","BITRADE_t","GHG_t",
+                     "P_USE_t","P_Mcif_t","P_I_t","P_Q_t","P_INPUT_t"]
 
 save:
-  formats: ["parquet","feather"]
+  formats: ["parquet","feather"]   # add "csv","fst","rds" if you like
+
+  # ---- selective bundles belong UNDER save: ----
   bundles:
     diagnostic_app:
       include: ["GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t",
                 "GINV_VAL_t","TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t",
-                "ir_t","P_HH_CPI_t","I_PP_t","K_t","L_t","GHG_t","KLratio_t",
-                "P_Q_t","P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+                "ir_t","P_HH_CPI_t","I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t",
+                "P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+
     results_app:
       include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
       filters:
         BITRADE_REG_t:
           keep:
-            c: ["TOT"]
+            c: ["TOT"]           # keep only commodity total
       csv_combine: true
       csv_basename: "results_bundle"
       csv_shape: "wide"
+
+
+derive:
+  # list base symbols to promote to derived if not present
+  include_from_base: ["GDPr_t"]
+  # optional: tell the promoter which keys to use when coercing long->wide
+  # keys:
+  #   GDPr_t: ["n","t"]
+
+
+export_csv:
+  enabled: true
+  bundle: "results_app"
+  out_basename: "results_bundle_template"  # becomes outputs/derived/<name>.csv
+  model_name: "FIDELIO"
+  pct_as_percent: true
+  include_dim_names: true
+  unit_overrides:
+    GDPr_t: "real (base=2014)"
+    TB_GDP_t: "ratio"
+    I_PP_SECT6_t: "PP units"
 ```
 
 ------------------------------------------------------------------------
