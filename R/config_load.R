@@ -68,9 +68,19 @@ load_config <- function(path = "config/project.yml", verbose = TRUE) {
   if (is.null(cfg$paths$cache)   || !nzchar(cfg$paths$cache))
     cfg$paths$cache   <- "outputs/cache"
   
-  # If scenarios missing, default to baseline + a policy case
-  if (is.null(cfg$scenarios) || !length(cfg$scenarios))
-    cfg$scenarios <- c("baseline","ff55")
+# --- scenarios: must come from YAML; normalize & ensure baseline first if present
+if (is.null(cfg$scenarios) || !length(cfg$scenarios)) {
+  stop("load_config(): cfg$scenarios missing or empty in YAML. Define at least 'baseline'.")
+}
+scn <- unique(trimws(as.character(cfg$scenarios)))
+if (!length(scn)) {
+  stop("load_config(): cfg$scenarios resolved to empty after normalization.")
+}
+if ("baseline" %in% scn) {
+  scn <- c("baseline", setdiff(scn, "baseline"))
+}
+cfg$scenarios <- scn
+
   
   # -- optional session overrides ---------------------------------------------
   cfg$paths$gdx_dir <- getOption("fidelio.gdx_dir", cfg$paths$gdx_dir)

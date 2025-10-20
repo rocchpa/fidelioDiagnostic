@@ -23,12 +23,13 @@ NULL
 # ----data.table NSE symbols and common column names created on the fly --------
 
 if (getRversion() >= "2.15.1") {
-  utils::globalVariables(c(
-    ".SD", ".N", ".I", ".GRP",
-    "value", "delta", "pct",
-    "n", "n1", "au", "oc", "i", "c", "t", "year",
-    "scenario", "baseline", "ff55"
-  ))
+utils::globalVariables(c(
+  ".SD",".N",".I",".GRP",
+  "value","delta","pct",
+  "n","n1","au","oc","i","c","t","year",
+  "scenario"
+))
+
 }
 
 #...............................................................................

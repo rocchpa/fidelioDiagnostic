@@ -13,7 +13,8 @@ export_results_csv(
   include_dim_names = FALSE,
   default_unit = "million EUR",
   unit_overrides = list(),
-  csv_sep = ","
+  csv_sep = ",",
+  tol_zero = 1e-12
 )
 }
 \arguments{
@@ -26,7 +27,7 @@ the function will call load_config() for you (robust to empty default.yml).}
 
 \item{model_name}{value for the \code{model} column (default "FIDELIO").}
 
-\item{pct_as_percent}{if TRUE, multiplies pct by 100.}
+\item{pct_as_percent}{if TRUE, multiplies pct_change by 100.}
 
 \item{include_dim_names}{if TRUE, encode dims as \code{i=C24|n1=USA};
 if FALSE (default), encode as \code{C24|USA} (i.e., no general set prefixes).}
@@ -36,6 +37,8 @@ if FALSE (default), encode as \code{C24|USA} (i.e., no general set prefixes).}
 \item{unit_overrides}{named list mapping symbol -> unit string (wins over defaults).}
 
 \item{csv_sep}{field separator passed to fwrite (use ";" for EU Excel).}
+
+\item{tol_zero}{numeric tolerance for baseline ~ 0 (avoid Inf).}
 }
 \description{
 Export bundled results to a template CSV (PyPSA-like)
