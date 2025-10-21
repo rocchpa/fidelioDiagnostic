@@ -41,7 +41,7 @@ safe_read_yaml <- function(file) {
 #'   supplied, it is treated as the overrides object directly.
 #' @param verbose Print resolved paths.
 #' @export
-load_config <- function(path = "config/project.yml", verbose = TRUE) {
+load_config <- function(path = "config/project.yml", verbose = FALSE) {
   # -- locate files ------------------------------------------------------------
   def_file      <- .to_abs("config/default.yml")
   override_file <- if (is.character(path) && length(path) == 1L) .to_abs(path) else NULL

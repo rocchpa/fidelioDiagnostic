@@ -57,7 +57,7 @@ add_sector_groups_additive <- function(DT, scenarios, append_original = TRUE) {
 }
 
 
-# --- Derived indicators orchestrator ------------------------------------------
+# --- Derived indicators  ------------------------------------------
 
 #' Compute all derived indicators requested in config
 #' @export

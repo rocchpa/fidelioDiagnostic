@@ -1,6 +1,5 @@
 project:
   id: "ff55_3scn"   # short, file-system-friendly
-  # If omitted, we'll fall back to the basename of paths$gdx_dir
 
 paths:
   gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
@@ -10,7 +9,7 @@ scenarios:
   - baseline
   - ff55
   - ff55_2
-  # add more later, e.g.
+  # add more later
   # - cbam
   # - nze
 
@@ -32,9 +31,15 @@ aggregations:
                      "P_USE_t","P_Mcif_t","P_I_t","P_Q_t","P_INPUT_t"]
 
 save:
-  formats: ["parquet","feather"]   # add "csv","fst","rds" if you like
+  # optional extra per-table formats (keep empty if you don't want them)
+  formats: []   # e.g., ["csv","fst","rds"]
 
-  # ---- selective bundles belong UNDER save: ----
+  # Write ONE consolidated list RDS with all variables (results_by_symbol):
+  list_rds:
+    enabled: true
+    basename: "results_by_symbol"   # versioned + _latest will be written
+
+  # Selective bundles (each becomes bundle_<name>_*.rds and _latest.rds)
   bundles:
     diagnostic_app:
       include: ["GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t",
@@ -48,28 +53,21 @@ save:
         BITRADE_REG_t:
           keep:
             c: ["TOT"]           # keep only commodity total
-      csv_combine: true
-      csv_basename: "results_bundle"
-      csv_shape: "wide"
-
 
 derive:
-  # list base symbols to promote to derived if not present
+  # list base symbols to promote to 'derived' (wide) if not already present there
   include_from_base: ["GDPr_t"]
-  # optional: tell the promoter which keys to use when coercing long->wide
   # keys:
   #   GDPr_t: ["n","t"]
 
-
 export_csv:
   enabled: true
-  bundle: "results_app"
-  out_basename: "results_bundle_template"  # becomes outputs/derived/<name>.csv
+  bundle: "results_app"                  # which bundle to export to CSV
+  out_basename: "results_bundle_template"  # outputs/derived/<name>.csv
   model_name: "FIDELIO"
   pct_as_percent: true
-  include_dim_names: true
+  include_dim_names: false
   unit_overrides:
     GDPr_t: "real (base=2014)"
     TB_GDP_t: "ratio"
     I_PP_SECT6_t: "PP units"
-

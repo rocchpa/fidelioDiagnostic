@@ -222,7 +222,7 @@ ui <- fluidPage(
     .var-help { background: #f6f8fa; border: 1px solid #e1e4e8; padding: 10px 12px; border-radius: 6px; margin-top: 10px; }
   "))),
   titlePanel(
-    if (is.null(.project_id)) "FIDELIO diagnostics" else paste0("FIDELIO diagnostics — ", .project_id)
+    if (is.null(.project_id)) "FIDELIO results" else paste0("FIDELIO results — ", .project_id)
   ),
   sidebarLayout(
     sidebarPanel(
