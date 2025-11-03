@@ -43,9 +43,10 @@ save:
   bundles:
     diagnostic_app:
       include: ["GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t",
-                "GINV_VAL_t","TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t",
+                "GINV_VAL_t","TB_t","TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t",
                 "ir_t","P_HH_CPI_t","I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t",
-                "P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+                "P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t",
+                "P_USE_t", "USE_PP_t", "M_TOT_t", "P_Mcif_t"]
 
     results_app:
       include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
