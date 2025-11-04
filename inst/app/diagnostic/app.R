@@ -24,9 +24,91 @@ cat("[APP] outputs/derived resolved to: ",
     normalizePath(file.path("outputs","derived"), winslash="/", mustWork = FALSE), "\n")
 
 # =========================
+# Minimal additions: robust config + outputs resolution
+# =========================
+
+# safe infix (needed early because get_results() uses it)
+`%||%` <- function(x, y) if (is.null(x) || (is.character(x) && !nzchar(x))) y else x
+
+# search upwards for project.yml if option/env are not set
+.find_up <- function(start = getwd(), names = c("project.yml", "config/project.yml"), max_up = 8) {
+  cur <- normalizePath(start, winslash = "/", mustWork = FALSE)
+  for (i in 0:max_up) {
+    for (nm in names) {
+      cand <- file.path(cur, nm)
+      if (file.exists(cand)) return(cand)
+    }
+    parent <- normalizePath(file.path(cur, ".."), winslash = "/", mustWork = FALSE)
+    if (identical(parent, cur)) break
+    cur <- parent
+  }
+  NULL
+}
+
+.read_last_ctx <- function(outputs_dir) {
+  if (!nzchar(outputs_dir)) return(NULL)
+  f <- file.path(outputs_dir, "last_run_context.rds")
+  if (!file.exists(f)) return(NULL)
+  ctx <- try(readRDS(f), silent = TRUE)
+  if (inherits(ctx, "try-error")) return(NULL)
+  ctx
+}
+
+.get_cfg <- function() {
+  # 1) explicit option/env
+  cfg_path <- getOption("fidelioDiagnostics.config", Sys.getenv("FIDELIO_DIAG_CONFIG", ""))
+  if (nzchar(cfg_path) && file.exists(cfg_path)) {
+    cat("[APP] Config via option/env: ", normalizePath(cfg_path, winslash="/"), "\n", sep = "")
+    return(load_config(cfg_path))
+  }
+  # 2) upward search
+  up <- .find_up()
+  if (!is.null(up)) {
+    cat("[APP] Config via upward search: ", normalizePath(up, winslash="/"), "\n", sep = "")
+    return(load_config(up))
+  }
+  # 3) package default
+  cfg_try <- try(load_config(), silent = TRUE)
+  if (!inherits(cfg_try, "try-error") && !is.null(cfg_try$project$id)) {
+    cat("[APP] Config via package default. Project id: ", cfg_try$project$id, "\n", sep = "")
+    return(cfg_try)
+  }
+  stop(
+    "[APP] Could not locate the project YAML.\n",
+    "Set one of:\n",
+    "  options(fidelioDiagnostics.config='C:/path/to/project.yml')  OR\n",
+    "  Sys.setenv(FIDELIO_DIAG_CONFIG='C:/path/to/project.yml')\n"
+  )
+}
+
+.resolve_outputs_derived <- function(cfg) {
+  cand <- character(0)
+  d1 <- try(outputs_dir_from_config(cfg), silent = TRUE)
+  if (!inherits(d1, "try-error") && is.character(d1) && length(d1) == 1) cand <- c(cand, d1)
+  if (is.character(cfg$paths$outputs) && length(cfg$paths$outputs) == 1) {
+    cand <- c(cand, file.path(cfg$paths$outputs, "derived"))
+  }
+  out_opt <- getOption("fidelioDiagnostics.outputs", Sys.getenv("FIDELIO_DIAG_OUTPUTS", ""))
+  if (nzchar(out_opt)) cand <- c(cand, out_opt)
+  
+  cand <- unique(cand)
+  for (p in cand) {
+    if (dir.exists(p)) {
+      ctx <- .read_last_ctx(p)
+      if (!is.null(ctx) && nzchar(ctx$outputs_dir) && dir.exists(ctx$outputs_dir)) {
+        return(normalizePath(ctx$outputs_dir, winslash="/"))
+      }
+      return(normalizePath(p, winslash="/"))
+    }
+  }
+  if (length(cand)) return(normalizePath(cand[1], winslash="/", mustWork = FALSE))
+  file.path("outputs", "derived")
+}
+
+# =========================
 # Config (project id in title)
 # =========================
-.cfg <- try(load_config(), silent = TRUE)
+.cfg <- try(.get_cfg(), silent = TRUE)  # << CHANGED: use robust getter
 .project_id <- tryCatch({
   if (!inherits(.cfg, "try-error") && !is.null(.cfg$project$id) && nzchar(.cfg$project$id)) .cfg$project$id else NULL
 }, error = function(e) NULL)
@@ -56,9 +138,10 @@ APP_KIND <- "diagnostic_app"   # or "results_app"
 # Data loading — auto-detect bundle by project id, backfill per-symbol
 # =========================
 get_results <- function() {
-  cfg <- load_config()
-  dir <- tryCatch(outputs_dir_from_config(cfg), error = function(e) NULL)
-  if (is.null(dir) || !dir.exists(dir)) dir <- file.path("outputs", "derived")
+  # << CHANGED: make dir resolution robust and independent of CWD
+  cfg <- .get_cfg()
+  dir <- .resolve_outputs_derived(cfg)
+  cat("\n[", APP_KIND, "] outputs dir: ", normalizePath(dir, winslash="/"), "\n", sep = "")
   
   # Symbols used in diagnostic views (nation, industry, bilateral)
   wanted <- c(
@@ -71,8 +154,6 @@ get_results <- function() {
     # Bilateral
     "BITRADE_REG_t"
   )
-  
-  cat("\n[", APP_KIND, "] outputs dir:", normalizePath(dir, winslash = "/"), "\n", sep = "")
   
   # 1) Pick bundle for this project id
   project_id <- cfg$project$id %||% ""
@@ -191,6 +272,7 @@ desc_of  <- function(sym) .meta[symbol == sym, desc ][1]
 # =========================
 # Helpers
 # =========================
+# (kept your original helper section as-is for backward compatibility)
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 macro_first <- function(vals) {
@@ -411,30 +493,6 @@ server <- function(input, output, session) {
       }
     ))
   })
-  
-  # output$var_help_box <- renderUI({
-  #   DT <- symDT()
-  #   if (is.null(DT)) return(NULL)
-  #   b  <- base_scn(.cfg)
-  #   pols_avail <- policy_scns(.cfg)
-  #   scn_shown  <- input$scn_pick
-  #   scn_txt <- if (length(scn_shown) == 0) "(no scenario selected)"
-  #   else paste(scn_shown, collapse = ", ")
-  #   
-  #   view_txt <- switch(input$view,
-  #                      plot_lvl = "Levels by scenario (wide → long).",
-  #                      plot_var = "Deviation vs baseline (Δ or %), one line per policy.",
-  #                      table    = "Raw table (filtered by keys)."
-  #   )
-  #   HTML(sprintf(
-  #     '<div class="var-help"><b>%s</b><br/><i>%s</i><br/>View: %s<br/>Baseline: <code>%s</code>. Policies available: %s.</div>',
-  #     label_of(input$sym),
-  #     desc_of(input$sym),
-  #     view_txt,
-  #     ifelse(length(b), b, "baseline"),
-  #     ifelse(length(pols_avail), paste(pols_avail, collapse = ", "), "—")
-  #   ))
-  # })
   
   # ---- Table
   output$tbl <- renderDT({
