@@ -4,7 +4,7 @@
 \alias{load_config}
 \title{Load and validate configuration (defaults + overrides)}
 \usage{
-load_config(path = "config/project.yml", verbose = TRUE)
+load_config(path = "config/project.yml", verbose = FALSE)
 }
 \arguments{
 \item{path}{Path to project YAML (default "config/project.yml"). If a list is

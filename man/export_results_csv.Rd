@@ -19,9 +19,9 @@ export_results_csv(
 }
 \arguments{
 \item{cfg}{list from load_config() or a path to config YAML. If omitted,
-the function will call load_config() for you (robust to empty default.yml).}
+the function will call load_config() (quiet) for you.}
 
-\item{bundle_name}{name of the saved bundle to read (default "results_app").}
+\item{bundle_name}{name of the saved bundle to read (e.g. "results_app").}
 
 \item{out_basename}{file stem for the CSV (default "results_bundle_template").}
 
@@ -30,11 +30,11 @@ the function will call load_config() for you (robust to empty default.yml).}
 \item{pct_as_percent}{if TRUE, multiplies pct_change by 100.}
 
 \item{include_dim_names}{if TRUE, encode dims as \code{i=C24|n1=USA};
-if FALSE (default), encode as \code{C24|USA} (i.e., no general set prefixes).}
+if FALSE, encode as \code{C24|USA} (no set prefixes).}
 
-\item{default_unit}{default unit string for all symbols except special cases.}
+\item{default_unit}{fallback unit for symbols not listed in \code{unit_overrides}.}
 
-\item{unit_overrides}{named list mapping symbol -> unit string (wins over defaults).}
+\item{unit_overrides}{named list mapping symbol -> unit string.}
 
 \item{csv_sep}{field separator passed to fwrite (use ";" for EU Excel).}
 

@@ -21,8 +21,44 @@ run_pipeline <- function(config = "config/project.yml") {
   .pipeline_reset_flags()
   
   # --- config & runtime --------------------------------------------------------
-  cfg <- if (is.list(config)) config else load_config(verbose = TRUE)
+  # NOTE: respect the 'config' argument (character path or pre-built list)
+  cfg <- if (is.list(config)) {
+    config
+  } else {
+    fidelioDiagnostics:::load_config(config, verbose = TRUE)
+  }
   print_runtime_info(cfg)
+  
+  # ---- NEW: capture the config path for downstream apps -----------------------
+  cfg_path <- if (is.character(config) && file.exists(config)) {
+    normalizePath(config, winslash = "/", mustWork = TRUE)
+  } else {
+    ap <- try(attr(cfg, "config_path", exact = TRUE), silent = TRUE)
+    if (!inherits(ap, "try-error") && !is.null(ap) && nzchar(ap) && file.exists(ap)) {
+      normalizePath(ap, winslash = "/", mustWork = TRUE)
+    } else {
+      ""  # unknown (still fine; apps will fall back to other strategies)
+    }
+  }
+  
+  # Expose config & outputs for the Shiny apps (works across the whole session)
+  # Apps will read these so they never depend on getwd()
+  if (nzchar(cfg_path)) {
+    options(fidelioDiagnostics.config  = cfg_path)
+  }
+  # Always set outputs option too (derived is what apps actually consume)
+  derived_dir <- file.path(cfg$paths$outputs, "derived")
+  dir.create(derived_dir, showWarnings = FALSE, recursive = TRUE)
+  options(fidelioDiagnostics.outputs = normalizePath(derived_dir, winslash = "/", mustWork = FALSE))
+  
+  # Persist a tiny context file so apps can also discover paths across sessions
+  context_file <- file.path(derived_dir, "last_run_context.rds")
+  saveRDS(list(
+    cfg_path    = if (nzchar(cfg_path)) cfg_path else NULL,
+    outputs_dir = normalizePath(derived_dir, winslash = "/", mustWork = FALSE),
+    project_id  = tryCatch(cfg$project$id, error = function(e) NULL),
+    when        = Sys.time()
+  ), context_file)
   
   ts <- .ts_stamp()
   `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -137,21 +173,17 @@ run_pipeline <- function(config = "config/project.yml") {
   universe <- results_by_symbol
   for (nm in names(derived)) universe[[nm]] <- derived[[nm]]
   
-  
   make_bundles(
-    objs         = universe,                # universe to pick from
+    objs         = universe,               # universe to pick from
     out_root     = out_root,
     bundles_spec = cfg$save$bundles,       # e.g. results_app / diagnostic_app
     cfg          = cfg,
     ts_shared    = ts
   )
   
-  
   # --- 7) Optional CSV export (now uses a proper bundle name) ------------------
   if (isTRUE(cfg$export_csv$enabled)) {
-    # The bundle NAME, not the spec:
     bundle_name <- cfg$export_csv$bundle_name %||% "results_app"
-    
     if (!.pipeline_flag_set(paste0("csv:", bundle_name))) {
       export_results_csv(
         cfg               = cfg,
@@ -166,8 +198,6 @@ run_pipeline <- function(config = "config/project.yml") {
       message("[SKIP] export_results_csv(): already written for '", bundle_name, "' in this run.")
     }
   }
-  
-
   
   invisible(list(cfg = cfg, raw = raw, results_by_symbol = results_by_symbol, derived = derived))
 }

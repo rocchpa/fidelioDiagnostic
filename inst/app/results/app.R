@@ -1,5 +1,5 @@
 # =========================
-# fidelioDiagnostics — Diagnostics app (multi-scenario ready)
+# fidelioDiagnostics — Results app (auto config/outputs discovery)
 # =========================
 library(shiny)
 library(data.table)
@@ -12,108 +12,187 @@ load_bundle             <- fidelioDiagnostics:::load_bundle
 load_manifest           <- fidelioDiagnostics:::load_manifest
 resolve_outputs_dir     <- fidelioDiagnostics:::resolve_outputs_dir
 outputs_dir_from_config <- fidelioDiagnostics:::outputs_dir_from_config
+load_config             <- fidelioDiagnostics:::load_config
 
-# scenario helpers
-base_scn      <- fidelioDiagnostics:::base_scn
-policy_scns   <- fidelioDiagnostics:::policy_scns
-scenario_cols <- fidelioDiagnostics:::scenario_cols
-load_config   <- fidelioDiagnostics:::load_config
+# safe infix
+`%||%` <- function(x, y) if (is.null(x) || (is.character(x) && !nzchar(x))) y else x
 
-cat("[APP] getwd(): ", getwd(), "\n")
-cat("[APP] outputs/derived resolved to: ",
-    normalizePath(file.path("outputs","derived"), winslash="/", mustWork = FALSE), "\n")
+APP_KIND <- "results_app"
+cat("[RESULTS] getwd(): ", getwd(), "\n", sep = "")
 
-# =========================
-# Config (project id in title)
-# =========================
-.cfg <- try(load_config(), silent = TRUE)
-.project_id <- tryCatch({
-  if (!inherits(.cfg, "try-error") && !is.null(.cfg$project$id) && nzchar(.cfg$project$id)) .cfg$project$id else NULL
-}, error = function(e) NULL)
+# ---- helper: search upwards for a YAML name ----
+.find_up <- function(start = getwd(), names = c("project.yml", "config/project.yml"), max_up = 8) {
+  cur <- normalizePath(start, winslash = "/", mustWork = FALSE)
+  for (i in 0:max_up) {
+    for (nm in names) {
+      cand <- file.path(cur, nm)
+      if (file.exists(cand)) return(cand)
+    }
+    parent <- normalizePath(file.path(cur, ".."), winslash = "/", mustWork = FALSE)
+    if (identical(parent, cur)) break
+    cur <- parent
+  }
+  NULL
+}
+
+# ---- persisted context written by pipeline (optional, but we try) ----
+.read_last_ctx <- function(outputs_dir) {
+  if (!nzchar(outputs_dir)) return(NULL)
+  f <- file.path(outputs_dir, "last_run_context.rds")
+  if (!file.exists(f)) return(NULL)
+  ctx <- try(readRDS(f), silent = TRUE)
+  if (inherits(ctx, "try-error")) return(NULL)
+  ctx
+}
+
+# ---- config resolution (no reliance on CWD) ----
+.get_cfg <- function() {
+  # 1) option/env explicit path
+  cfg_path <- getOption("fidelioDiagnostics.config", Sys.getenv("FIDELIO_DIAG_CONFIG", ""))
+  if (nzchar(cfg_path) && file.exists(cfg_path)) {
+    cat("[RESULTS] Config via option/env: ", normalizePath(cfg_path, winslash="/"), "\n", sep = "")
+    return(load_config(cfg_path))
+  }
+  # 2) upward search from current dir (works if you run from repo or subdirs)
+  up <- .find_up()
+  if (!is.null(up)) {
+    cat("[RESULTS] Config via upward search: ", normalizePath(up, winslash="/"), "\n", sep = "")
+    return(load_config(up))
+  }
+  # 3) bare load_config() as a final attempt (package default)
+  cfg_try <- try(load_config(), silent = TRUE)
+  if (!inherits(cfg_try, "try-error") && !is.null(cfg_try$project$id)) {
+    cat("[RESULTS] Config via package default. Project id: ", cfg_try$project$id, "\n", sep = "")
+    return(cfg_try)
+  }
+  stop(
+    "[RESULTS] Could not locate the project YAML.\n",
+    "Set one of:\n",
+    "  options(fidelioDiagnostics.config='C:/path/to/project.yml')  OR\n",
+    "  Sys.setenv(FIDELIO_DIAG_CONFIG='C:/path/to/project.yml')\n"
+  )
+}
+
+
+# ---- Resolve cfg once and get a safe project id string for the window title ----
+.cfg <- try(.get_cfg(), silent = TRUE)
+.project_id_str <- tryCatch({
+  if (!inherits(.cfg, "try-error") && !is.null(.cfg$project$id) && nzchar(.cfg$project$id)) {
+    as.character(.cfg$project$id)
+  } else ""
+}, error = function(e) "")
+
+# ---- Build UI title safely (avoid name clashes with a function named .project_id) ----
+.title_text <- if (!nzchar(.project_id_str)) "FIDELIO results" else paste0("FIDELIO results — ", .project_id_str)
+
+# ---- Defensive check: ensure 'server' is a function before starting the app ----
+.on_app_start <- function() {
+  if (exists("server", inherits = TRUE) && !is.function(get("server", inherits = TRUE))) {
+    stop("[RESULTS] 'server' exists but is not a function. Rename the object or fix its definition.")
+  }
+}
+
+
+# ---- outputs/derived resolution (uses cfg + option/env + context) ----
+.resolve_outputs_derived <- function(cfg) {
+  cand <- character(0)
+  # from cfg helper
+  d1 <- try(outputs_dir_from_config(cfg), silent = TRUE)
+  if (!inherits(d1, "try-error") && is.character(d1) && length(d1) == 1) cand <- c(cand, d1)
+  # from cfg paths
+  if (is.character(cfg$paths$outputs) && length(cfg$paths$outputs) == 1) {
+    cand <- c(cand, file.path(cfg$paths$outputs, "derived"))
+  }
+  # from option/env
+  out_opt <- getOption("fidelioDiagnostics.outputs", Sys.getenv("FIDELIO_DIAG_OUTPUTS", ""))
+  if (nzchar(out_opt)) cand <- c(cand, out_opt)
+  
+  cand <- unique(cand)
+  # try persisted context inside each candidate
+  for (p in cand) {
+    if (dir.exists(p)) {
+      ctx <- .read_last_ctx(p)
+      if (!is.null(ctx) && nzchar(ctx$outputs_dir) && dir.exists(ctx$outputs_dir)) {
+        return(normalizePath(ctx$outputs_dir, winslash="/"))
+      }
+      return(normalizePath(p, winslash="/"))
+    }
+  }
+  # last resort: the first candidate (may not exist, but keeps logs explicit)
+  if (length(cand)) return(normalizePath(cand[1], winslash="/", mustWork = FALSE))
+  file.path("outputs", "derived")
+}
+
+# ---- pick bundle by project id (if available) ----
+.pick_bundle_for_project <- function(dir, project_id, app_kind = APP_KIND) {
+  fs <- list.files(dir, full.names = TRUE)
+  if (!length(fs)) return(NULL)
+  p1 <- sprintf("^bundle_%s_%s_.*\\.(rds|qs)$", app_kind, project_id)
+  p2 <- sprintf("^bundle_.*_%s_.*\\.(rds|qs)$", project_id)
+  p3 <- sprintf("^results_bundle_%s_.*\\.(rds|qs)$", project_id)
+  cand <- fs[grepl(p1, basename(fs), TRUE)]
+  if (!length(cand)) cand <- fs[grepl(p2, basename(fs), TRUE)]
+  if (!length(cand)) cand <- fs[grepl(p3, basename(fs), TRUE)]
+  if (!length(cand)) return(NULL)
+  cand <- cand[order(file.info(cand)$mtime, decreasing = TRUE)]
+  tools::file_path_sans_ext(basename(cand[1]))
+}
 
 # =========================
 # Data loading
 # =========================
-# =========================
-# App constants (set per app file)
-# =========================
-APP_KIND <- "diagnostic_app"   # or "results_app"
-
-# =========================
-# Bundle picker (by project id)
-# =========================
-.pick_bundle_for_project <- function(dir, project_id, app_kind = APP_KIND) {
-  # Prefer: bundle_<app>_<project>_*.{rds,qs}
-  p1 <- sprintf("^bundle_%s_%s_.*\\.(rds|qs)$", app_kind, project_id)
-  # Fallbacks: any bundle_*_<project>_*.{rds,qs}, or results_bundle_<project>_*.{rds,qs}
-  p2 <- sprintf("^bundle_.*_%s_.*\\.(rds|qs)$", project_id)
-  p3 <- sprintf("^results_bundle_%s_.*\\.(rds|qs)$", project_id)
-  
-  fs <- list.files(dir, full.names = TRUE)
-  cand <- fs[grepl(p1, basename(fs), ignore.case = TRUE)]
-  if (!length(cand)) cand <- fs[grepl(p2, basename(fs), ignore.case = TRUE)]
-  if (!length(cand)) cand <- fs[grepl(p3, basename(fs), ignore.case = TRUE)]
-  if (!length(cand)) return(NULL)
-  
-  cand <- cand[order(file.info(cand)$mtime, decreasing = TRUE)]
-  tools::file_path_sans_ext(basename(cand[1]))  # bundle name (without extension)
-}
-
-# =========================
-# Data loading — auto-detect bundle by project id
-# =========================
 get_results <- function() {
-  cfg <- load_config()
-  dir <- tryCatch(outputs_dir_from_config(cfg), error = function(e) NULL)
-  if (is.null(dir) || !dir.exists(dir)) dir <- file.path("outputs", "derived")
+  cfg <- .get_cfg()
+  derived <- .resolve_outputs_derived(cfg)
+  cat("[RESULTS] outputs/derived: ", derived, "\n", sep = "")
   
   wanted <- c("GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t")
   
-  cat("\n[", APP_KIND, "] outputs dir:", normalizePath(dir, winslash = "/"), "\n", sep = "")
-  
-  # 1) Pick bundle for this project id
+  # prefer bundles (no manifest required), auto-pick by project id when possible
   project_id <- cfg$project$id %||% ""
-  bundle_name <- if (nzchar(project_id)) .pick_bundle_for_project(dir, project_id) else NULL
-  if (!is.null(bundle_name)) cat("[", APP_KIND, "] Using bundle: ", bundle_name, "\n", sep = "")
+  bundle_name <- if (nzchar(project_id)) .pick_bundle_for_project(derived, project_id) else NULL
+  if (!is.null(bundle_name)) {
+    cat("[RESULTS] Using bundle: ", bundle_name, "\n", sep = "")
+  } else {
+    cat("[RESULTS] No project-specific bundle matched. Will try generic '", APP_KIND, "'.\n", sep = "")
+  }
   
-  # 2) Try to load the chosen bundle, else fall back to "results_app" / "diagnostic_app"
   try_names <- unique(na.omit(c(bundle_name, APP_KIND)))
   b <- list()
   for (nm in try_names) {
-    tmp <- try(load_bundle(nm, dir = dir), silent = TRUE)
+    tmp <- try(load_bundle(nm, dir = derived), silent = TRUE)
     if (!inherits(tmp, "try-error") && length(tmp)) { b <- tmp; break }
   }
   if (!length(b)) {
-    cat("[", APP_KIND, "] No bundle loaded. Will backfill per-symbol files.\n", sep = "")
+    cat("[RESULTS] No bundle loaded. Will backfill per-symbol files.\n", sep = "")
     b <- list()
   }
   
-  # 3) Backfill per-symbol files for anything missing from the bundle
+  # Backfill (works only if you still save per-symbol files)
   missing <- setdiff(wanted, names(b))
   if (length(missing)) {
-    cat("[", APP_KIND, "] Backfilling per-symbol files for: ", paste(missing, collapse = ", "), "\n", sep = "")
+    cat("[RESULTS] Backfilling symbols: ", paste(missing, collapse = ", "), "\n", sep = "")
     for (s in missing) {
-      files <- list.files(dir, pattern = paste0("^", s, "\\.(parquet|feather|fst|rds|csv)$"))
+      files <- list.files(derived, pattern = paste0("^", s, "\\.(parquet|feather|fst|rds|csv)$"))
       cat("  ·", s, "files in dir:", if (length(files)) paste(files, collapse = ", ") else "(none)", "\n")
-      b[[s]] <- try(load_symbol(s, dir = dir), silent = TRUE)
+      b[[s]] <- try(load_symbol(s, dir = derived), silent = TRUE)
       if (inherits(b[[s]], "try-error")) b[[s]] <- NULL
     }
   }
   
-  # 4) Drop NULL/empty & report
   b <- Filter(function(x) !is.null(x) && is.data.frame(x) && nrow(x) > 0, b)
   have <- intersect(names(b), wanted)
   miss <- setdiff(wanted, have)
-  cat("[", APP_KIND, "] Loaded symbols: ", paste(have, collapse = ", "), "\n", sep = "")
-  if (length(miss)) cat("[", APP_KIND, "] Missing or empty: ", paste(miss, collapse = ", "), "\n", sep = "")
+  cat("[RESULTS] Loaded symbols: ", paste(have, collapse = ", "), "\n", sep = "")
+  if (length(miss)) cat("[RESULTS] Missing or empty: ", paste(miss, collapse = ", "), "\n", sep = "")
   
   b
 }
 
-
 results_by_symbol <- get_results()
 results_by_symbol <- Filter(function(x) !is.null(x) && nrow(x) > 0, results_by_symbol)
 available_syms <- names(results_by_symbol)
+
 
 # =========================
 # Meta (labels, groups, short descriptions)
@@ -216,14 +295,19 @@ shallow_copy <- function(x) {
 # UI
 # =========================
 ui <- fluidPage(
-  tags$head(tags$style(HTML("
-    .container-fluid { padding-top: 6px; }
-    .selectize-dropdown .optgroup-header { font-weight: 600; }
-    .var-help { background: #f6f8fa; border: 1px solid #e1e4e8; padding: 10px 12px; border-radius: 6px; margin-top: 10px; }
-  "))),
-  titlePanel(
-    if (is.null(.project_id)) "FIDELIO results" else paste0("FIDELIO results — ", .project_id)
+  # Set browser tab title + styles
+  tags$head(
+    tags$title(.title_text),
+    tags$style(HTML("
+      .container-fluid { padding-top: 6px; }
+      .selectize-dropdown .optgroup-header { font-weight: 600; }
+      .var-help { background: #f6f8fa; border: 1px solid #e1e4e8; padding: 10px 12px; border-radius: 6px; margin-top: 10px; }
+    "))
   ),
+  
+  # Show page title once in the body
+  titlePanel(.title_text),
+  
   sidebarLayout(
     sidebarPanel(
       selectizeInput("sym", "Variable:", choices = choices_grouped, selected = .meta$symbol[1]),
@@ -233,21 +317,28 @@ ui <- fluidPage(
                    c("Table" = "table", "Plot levels" = "plot_lvl", "Plot Δ / %" = "plot_var"),
                    selected = "plot_lvl"),
       checkboxInput("asPercent", "Show Δ as %", TRUE),
-      
       hr(),
       div(class = "sticky-help", uiOutput("var_help_box"))
     ),
     mainPanel(
-       conditionalPanel("input.view == 'table'", DTOutput("tbl")),
+      conditionalPanel("input.view == 'table'", DTOutput("tbl")),
       conditionalPanel("input.view != 'table'", plotOutput("plt", height = "650px"))
     )
   )
 )
 
+
 # =========================
 # Server
 # =========================
-server <- function(input, output, session) {
+
+# --- guard against name collisions ---
+if (exists("server", inherits = TRUE) && !is.function(get("server", inherits = TRUE))) {
+  message("[RESULTS] Found a non-function object named 'server' — removing it to avoid Shiny handler errors.")
+  rm(server, inherits = TRUE)
+}
+
+server_fn <- function(input, output, session) {
   
   symDT <- reactive({ results_by_symbol[[input$sym]] })
   
@@ -584,4 +675,10 @@ server <- function(input, output, session) {
   )
 }
 
-shinyApp(ui, server)
+# (Optional tiny diag)
+cat("[RESULTS] server_fn is function? ", is.function(server_fn), "\n", sep = "")
+
+# =========================
+# Launch
+# =========================
+shinyApp(ui = ui, server = server_fn)
