@@ -1,14 +1,16 @@
 project:
-  id: "ff55_3scn"   # short, file-system-friendly
+  id: "cbam"   # short, file-system-friendly
 
 paths:
-  gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
+  # gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
+  gdx_dir: "data-raw/gdx/cbam"
   outputs: "outputs"
 
 scenarios:
   - baseline
-  - ff55
-  - ff55_2
+  - cbam
+  # - ff55
+  # - ff55_2
   # add more later
   # - cbam
   # - nze

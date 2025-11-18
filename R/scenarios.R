@@ -1,8 +1,17 @@
-# R/scenarios.R
-
-# Return cfg (if not provided) using your existing loader
+# Return cfg (if not provided) using project-aware loader
 .get_cfg <- function(cfg = NULL) {
-  if (is.null(cfg)) load_config() else cfg
+  if (!is.null(cfg)) return(cfg)
+  
+  # First, honour the same option / env as the apps + pipeline
+  cfg_path <- getOption("fidelioDiagnostics.config",
+                        Sys.getenv("FIDELIO_DIAG_CONFIG", ""))
+  
+  if (nzchar(cfg_path) && file.exists(cfg_path)) {
+    return(load_config(cfg_path))
+  }
+  
+  # Fallback: old behaviour (relative "config/project.yml")
+  load_config()
 }
 
 # Baseline is the first scenario
