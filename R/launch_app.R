@@ -1,7 +1,6 @@
 # ==============================================================================
 # ====                            launch_app.R                              ====
 # ==============================================================================
-
 #' Launch one of the packaged Shiny apps
 #' @param app "diagnostic" or "results"
 #' @param outputs_dir Optional absolute path to outputs/derived.
@@ -20,6 +19,39 @@ launch_app <- function(app = c("diagnostic","results"),
   app_dir <- system.file("app", app, package = pkg)
   if (!nzchar(app_dir) || !dir.exists(app_dir)) {
     stop("App '", app, "' not found in this package (", pkg, ").")
+  }
+  
+  # ---------------------------------------------------------------------------
+  # Auto-config: set fidelioDiagnostics.config if the user did not set it
+  # ---------------------------------------------------------------------------
+  prev_cfg_opt   <- getOption("fidelioDiagnostics.config", NULL)
+  prev_cfg_char  <- if (is.null(prev_cfg_opt)) "" else as.character(prev_cfg_opt)
+  
+  if (!nzchar(prev_cfg_char)) {
+    cand <- character(0)
+    
+    # 1) explicit config_path argument
+    if (!is.null(config_path) && nzchar(config_path)) {
+      cand <- c(cand, config_path)
+    }
+    
+    # 2) project_root/config/project.yml if project_root given
+    if (!is.null(project_root) && nzchar(project_root)) {
+      cand <- c(cand, file.path(project_root, "config", "project.yml"))
+    }
+    
+    # 3) default: ./config/project.yml from current working directory
+    local_cfg <- file.path(getwd(), "config", "project.yml")
+    cand <- c(cand, local_cfg)
+    
+    # keep only existing files, normalised
+    cand <- cand[file.exists(cand)]
+    cand <- unique(normalizePath(cand, winslash = "/", mustWork = FALSE))
+    
+    if (length(cand)) {
+      options(fidelioDiagnostics.config = cand[[1]])
+      on.exit(options(fidelioDiagnostics.config = prev_cfg_opt), add = TRUE)
+    }
   }
   
   # If the user passed project_root, advertise it so resolve_project_root() works
