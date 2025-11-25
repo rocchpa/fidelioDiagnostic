@@ -2,15 +2,15 @@ project:
   id: "cbam"   # short, file-system-friendly
 
 paths:
-  # gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
-  gdx_dir: "data-raw/gdx/cbam"
+  gdx_dir: "data-raw/gdx/eta_cpi_025_beta_infl_1"
+  #gdx_dir: "data-raw/gdx/cbam"
   outputs: "outputs"
 
 scenarios:
   - baseline
-  - cbam
-  # - ff55
-  # - ff55_2
+  # - cbam
+  - ff55
+  - ff55tariffs
   # add more later
   # - cbam
   # - nze
@@ -47,11 +47,11 @@ save:
       include: ["GDPr_t","HDY_VAL_t","HDYr_t","I_TOT_PP_t","DS_t","FS_t","GSUR_VAL_t",
                 "GINV_VAL_t","TB_t","TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t",
                 "ir_t","P_HH_CPI_t","I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t",
-                "P_KL_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t",
+                "P_KL_t","I_PP_SECT6_t","Q_SECT6_t","Q_SECT6_REG_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t","BITRADE_SECT6_REG_t",
                 "P_USE_t", "USE_PP_t", "M_TOT_t", "P_Mcif_t"]
 
     results_app:
-      include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t"]
+      include: ["GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","Q_SECT6_t","Q_SECT6_REG_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t","BITRADE_SECT6_REG_t"]
       filters:
         BITRADE_REG_t:
           keep:

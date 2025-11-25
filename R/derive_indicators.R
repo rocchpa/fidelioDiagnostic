@@ -29,6 +29,24 @@
     default =  "other"
   )
 }
+# estrai da codici tipo "CPA_C24_S" un codice tipo "C24"
+.cpa_to_sect_code <- function(cc) {
+  cc <- as.character(cc)
+  
+  # se è già tipo "C24" o "D35", lascio così
+  is_simple <- grepl("^[A-Z][0-9]{2}$", cc)
+  
+  base <- cc
+  base[!is_simple] <- sub("^CPA_([A-Z][0-9]{2}).*$", "\\1", cc[!is_simple])
+  
+  # per eventuali codici strani che non matchano, fallback alla prima lettera
+  still_bad <- !grepl("^[A-Z][0-9]{2}$", base)
+  if (any(still_bad)) {
+    base[still_bad] <- substr(cc[still_bad], 1, 1)
+  }
+  
+  base
+}
 
 # Add 6-group sector aggregates to an (n,i,t,<scenarios...>) wide table.
 add_sector_groups_additive <- function(DT, scenarios, append_original = TRUE) {
@@ -364,6 +382,56 @@ derive_from_wide <- function(rs, cfg) {
     out[["I_PP_SECT6_t"]] <- I_PP_G6
   }
   
+  # --- Investment by industry: 6-group aggregates -----------------------------
+  Q <- rs[["Q_t"]]
+  if (!is.null(Q) && is.data.table(Q)) {
+    if ("scenario" %in% names(Q) && "value" %in% names(Q)) {
+      Q <- wide_by_scenario(Q, scenarios = scenarios)
+    }
+    sel <- c("n","i","t", scenarios)
+    Q_sub <- Q[, sel, with = FALSE]
+    
+    Q_G6 <- add_sector_groups_additive(
+      Q_sub, scenarios = scenarios, append_original = FALSE
+    )
+    Q_G6 <- add_macroregions_additive(Q_G6, EU28, scenarios = scenarios)
+    Q_G6 <- add_var_cols_multi(Q_G6, base = base_scn, policies = pol_scns, cfg = cfg)
+    out[["Q_SECT6_t"]] <- Q_G6
+  }
+
+    # --- Output by industry: 6-group aggregates, macro-region map (EEU/NWEU/SEU) ----
+  Q <- rs[["Q_t"]]
+  if (!is.null(Q) && is.data.table(Q)) {
+    if ("scenario" %in% names(Q) && "value" %in% names(Q)) {
+      Q <- wide_by_scenario(Q, scenarios = scenarios)
+    }
+    sel <- c("n","i","t", scenarios)
+    Q_sub <- Q[, sel, with = FALSE]
+
+    # garantisco tipi "puliti" (coerente con uso in BITRADE_REG_t)
+    Q_sub <- norm_key_types(Q_sub)
+
+    # 1) mappo i paesi nelle macro–regioni BITRADE
+    Q_sub[, n := .region_map_vec(n)]
+
+    # 2) sommo per macro–regione, settore, anno
+    Q_reg <- Q_sub[, lapply(.SD, sum, na.rm = TRUE),
+                   .SDcols = scenarios, by = .(n, i, t)]
+
+    # 3) applico l’aggregazione in 6 gruppi settoriali
+    Q_reg_G6 <- add_sector_groups_additive(
+      Q_reg, scenarios = scenarios, append_original = FALSE
+    )
+
+    # 4) calcolo Δ e % tra baseline e policy *dopo* l’aggregazione
+    Q_reg_G6 <- add_var_cols_multi(
+      Q_reg_G6, base = base_scn, policies = pol_scns, cfg = cfg
+    )
+
+    out[["Q_SECT6_REG_t"]] <- Q_reg_G6
+  }
+
+  
   # --- Output composition by 6 groups (REAL terms; shares sum to 100) ---------
   GOq_by_i <- NULL
   if (!is.null(rs[["Q_t"]])) {
@@ -420,6 +488,87 @@ derive_from_wide <- function(rs, cfg) {
     BT_reg <- BT_src[, lapply(.SD, sum, na.rm = TRUE),
                      .SDcols = scenarios, by = .(n, n1, c, t)]
     
+    
+    # --- BITRADE by macro regions AND 6-group sector aggregates --------------
+    # --- BITRADE by macro regions AND 6-group sector aggregates --------------
+    # 1) copia BT_reg e rimuovo l’eventuale TOT delle commodities
+    BT_reg_G6 <- data.table::copy(BT_reg)[c != "TOT"]
+    
+    # 2) mappo direttamente i codici CPA_* in 6 macro–settori
+    #    CPA_C24_S -> C24 -> high_energy_manufacturing / low_energy_...
+    BT_reg_G6[, i := .sector_group6_vec(.cpa_to_sect_code(c))]
+    
+    # 3) sommo per (n, n1, macro–settore, t)
+    BT_reg_G6 <- BT_reg_G6[
+      ,
+      lapply(.SD, sum, na.rm = TRUE),
+      .SDcols = scenarios,
+      by = .(n, n1, i, t)
+    ]
+    
+    # 4) rinomino “i” -> “c” per coerenza con BITRADE_REG_t
+    BT_reg_G6[, c := i]
+    BT_reg_G6[, i := NULL]
+    
+    # 5) TOT per importatore
+    imp_tot_G6 <- BT_reg_G6[
+      ,
+      lapply(.SD, sum, na.rm = TRUE),
+      .SDcols = scenarios,
+      by = .(n, c, t)
+    ]
+    imp_tot_G6[, n1 := "TOT"]
+    data.table::setcolorder(imp_tot_G6, c("n","n1","c","t", scenarios))
+    
+    # 6) TOT per esportatore
+    exp_tot_G6 <- BT_reg_G6[
+      ,
+      lapply(.SD, sum, na.rm = TRUE),
+      .SDcols = scenarios,
+      by = .(n1, c, t)
+    ]
+    exp_tot_G6[, n := "TOT"]
+    data.table::setcolorder(exp_tot_G6, c("n","n1","c","t", scenarios))
+    
+    # 7) unisco
+    BT_reg2_G6 <- data.table::rbindlist(
+      list(BT_reg_G6, imp_tot_G6, exp_tot_G6),
+      use.names = TRUE
+    )
+    
+    # 8) TOT complessivo (c = "TOT")
+    prod_tot_G6 <- BT_reg2_G6[
+      ,
+      lapply(.SD, sum, na.rm = TRUE),
+      .SDcols = scenarios,
+      by = .(n, n1, t)
+    ]
+    prod_tot_G6[, c := "TOT"]
+    data.table::setcolorder(prod_tot_G6, c("n","n1","c","t", scenarios))
+    
+    BT_reg3_G6 <- data.table::rbindlist(
+      list(BT_reg2_G6, prod_tot_G6),
+      use.names = TRUE
+    )
+    
+    # 9) anno + delta
+    BT_reg3_G6[, year := 2014L + as.integer(t)]
+    BT_reg3_G6 <- add_var_cols_multi(
+      BT_reg3_G6,
+      base     = base_scn,
+      policies = pol_scns,
+      cfg      = cfg
+    )
+    
+    order_levels <- c("EEU","NWEU","SEU","USA","CHN","IND","OECD","NonOECD","ROW","TOT")
+    BT_reg3_G6[, n  := factor(as.character(n),  levels = order_levels)]
+    BT_reg3_G6[, n1 := factor(as.character(n1), levels = order_levels)]
+    
+    out[["BITRADE_SECT6_REG_t"]] <- BT_reg3_G6[]
+    
+    
+    
+    
     imp_tot <- BT_reg[, lapply(.SD, sum), .SDcols = scenarios, by = .(n, c, t)]
     imp_tot[, n1 := "TOT"]; data.table::setcolorder(imp_tot, c("n","n1","c","t", scenarios))
     
@@ -444,3 +593,4 @@ derive_from_wide <- function(rs, cfg) {
   
   Filter(Negate(is.null), out)
 }
+

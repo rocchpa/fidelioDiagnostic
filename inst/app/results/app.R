@@ -146,7 +146,7 @@ get_results <- function() {
   derived <- .resolve_outputs_derived(cfg)
   cat("[RESULTS] outputs/derived: ", derived, "\n", sep = "")
   
-  wanted <- c("GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t")
+  wanted <- c("GDPr_t","TBr_t","TB_GDP_t","I_PP_SECT6_t","Q_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t","BITRADE_REG_t")
   
   # prefer bundles (no manifest required), auto-pick by project id when possible
   project_id <- cfg$project$id %||% ""
@@ -210,11 +210,12 @@ available_syms <- names(results_by_symbol)
     keep = TRUE
   ),
   data.table(
-    symbol = c("I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t"),
-    label  = c("Investment by 6-sector group","Output shares by 6-sector groups (real)"),
+    symbol = c("I_PP_SECT6_t","Q_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t"),
+    label  = c("Investment by 6-sector group","Output by 6-sector group","Output shares by 6-sector groups (real)"),
     group  = "Industry level",
     desc   = c(
       "Gross investment by 6 aggregated sector groups.",
+      "Output by 6 aggregated sector groups.",
       "Share of real output by 6 aggregated sector groups (sums to 1)."
     ),
     keep = TRUE
@@ -458,6 +459,7 @@ server_fn <- function(input, output, session) {
            ),
            "TB_GDP_t" = "Interpretation: ratio of trade balance to GDP; positive = surplus/GDP, negative = deficit/GDP.",
            "I_PP_SECT6_t" = "Interpretation: gross investment aggregated into 6 sector groups.",
+            "Q_PP_SECT6_t" = "Interpretation: output aggregated into 6 sector groups.",
            NULL # default = no extra note
     )
   }

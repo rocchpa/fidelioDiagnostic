@@ -150,9 +150,9 @@ get_results <- function() {
     "TBr_t","TB_GDP_t","HSAVR_t","U_t","KLratio_country_t","ir_t","P_HH_CPI_t",
     # Industry level
     "I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t","P_KL_t",
-    "I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t",
+    "I_PP_SECT6_t","Q_SECT6_t","Q_SECT6_REG_t","OUT_COMP6_SHARE_REAL_t",
     # Bilateral
-    "BITRADE_REG_t"
+    "BITRADE_REG_t","BITRADE_SECT6_REG_t"
   )
   
   # 1) Pick bundle for this project id
@@ -233,10 +233,10 @@ available_syms <- names(results_by_symbol)
   # Industry level
   data.table(
     symbol = c("I_PP_t","K_t","L_t","GHG_t","KLratio_t","P_Q_t","P_KL_t",
-               "I_PP_SECT6_t","OUT_COMP6_SHARE_REAL_t"),
+               "I_PP_SECT6_t","Q_SECT6_t","Q_SECT6_REG_t","OUT_COMP6_SHARE_REAL_t"),
     label  = c("Investment by sector","Capital demand","Labor demand","Emissions",
                "Capital–labor ratio (sector)","Output price","K/L price",
-               "Investment by 6-sector group","Output shares by 6-sector groups (real)"),
+               "Investment by 6-sector group","output by 6-sector group","output by 6-sector group and macro-reigons","Output shares by 6-sector groups (real)"),
     group  = "Industry level",
     desc   = c(
       "Gross investment by sector.",
@@ -247,16 +247,19 @@ available_syms <- names(results_by_symbol)
       "Sectoral output price index.",
       "Price of the composite K–L nest.",
       "Gross investment aggregated into six sector groups.",
+      "Output by 6 aggregated sector groups.",
+      "Output by 6 aggregated sector groups and macroregions.",
       "Share of real output by six sector groups (sums to 1)."
     ),
     keep = TRUE
   ),
   # Bilateral trade
   data.table(
-    symbol = "BITRADE_REG_t",
-    label  = "Bilateral trade flows (macro regions)",
+    symbol = c("BITRADE_REG_t","BITRADE_SECT6_REG_t"),
+    label  = c("Bilateral trade flows (macro regions)","Bilateral trade flows (macro regions adn macro sectors)"),
     group  = "Bilateral trade",
-    desc   = "Bilateral trade matrix across macro regions (origin n → destination n1).",
+    desc   = c("Bilateral trade matrix across macro regions (origin n → destination n1).",
+               "Bilateral trade matrix across macro regions and sectors (origin n → destination n1)."),
     keep   = TRUE
   )
 ))
@@ -474,6 +477,7 @@ server <- function(input, output, session) {
            ),
            "TB_GDP_t" = "Interpretation: ratio of trade balance to GDP; positive = surplus/GDP, negative = deficit/GDP.",
            "I_PP_SECT6_t" = "Interpretation: gross investment aggregated into 6 sector groups.",
+            "Q_PP_SECT6_t" = "Interpretation: output aggregated into 6 sector groups.",
            NULL # default = no extra note
     )
   }
@@ -560,6 +564,122 @@ server <- function(input, output, session) {
         return(p)
       }
     }
+    
+    
+    # ---- SPECIAL: BITRADE_SECT6_REG_t (faceted matrix by macro regions, one sector group) ----
+    if (input$sym == "BITRADE_SECT6_REG_t") {
+      BT <- filteredDT()
+      req(!is.null(BT), NROW(BT) > 0)
+      
+      # provo a recuperare il nome del gruppo settoriale (se c'è un solo valore di c)
+      sect_lab <- ""
+      if ("c" %in% names(BT)) {
+        clv <- unique(BT$c)
+        if (length(clv) == 1L) {
+          sect_lab <- paste("– Sector group:", as.character(clv))
+        }
+      }
+      
+      if (input$view == "plot_var") {
+        L <- to_long_var(
+          BT,
+          use_pct      = isTRUE(input$asPercent),
+          only_policies = pol_pick
+        )
+        req(!is.null(L), NROW(L) > 0)
+        
+        ord <- c("EEU","NWEU","SEU","USA","CHN","IND","OECD","NonOECD","ROW","TOT")
+        if ("n"  %in% names(L))  L[,  n  := factor(as.character(n),  levels = ord)]
+        if ("n1" %in% names(L))  L[, n1 := factor(as.character(n1), levels = ord)]
+        
+        xcol <- if ("year" %in% names(L)) "year" else "t"
+        ylab <- if (isTRUE(input$asPercent)) "Deviation wrt baseline (%)" else "Change (level)"
+        
+        p <- ggplot(
+          L,
+          aes_string(
+            x       = xcol,
+            y       = "value",
+            color   = "scenario",
+            linetype = "scenario",
+            group   = "scenario"
+          )
+        ) +
+          geom_hline(yintercept = 0, linewidth = 0.3) +
+          geom_line(linewidth = 0.8) +
+          facet_grid(n1 ~ n, scales = "free_y") +
+          labs(
+            x      = "Year",
+            y      = ylab,
+            title  = paste("Bilateral trade (macro regions & sector groups):", pair_title(), sect_lab),
+            color  = "Policy",
+            linetype = "Policy"
+          ) +
+          theme_minimal(base_size = 11) +
+          theme(
+            legend.position = "bottom",
+            panel.border     = element_rect(color = "black", fill = NA, linewidth = 0.4),
+            panel.background = element_rect(fill = "grey97", color = NA)
+          )
+        
+        return(p)
+        
+      } else {
+        Scns     <- scenario_cols(BT)
+        use_scns <- if (length(scn_pick)) intersect(Scns, scn_pick) else Scns
+        
+        L <- to_long_levels(BT, scenarios = use_scns)
+        req(!is.null(L), NROW(L) > 0)
+        
+        ord <- c("EEU","NWEU","SEU","USA","CHN","IND","OECD","NonOECD","ROW","TOT")
+        if ("n"  %in% names(L))  L[,  n  := factor(as.character(n),  levels = ord)]
+        if ("n1" %in% names(L))  L[, n1 := factor(as.character(n1), levels = ord)]
+        
+        xcol <- if ("year" %in% names(L)) "year" else "t"
+        
+        p <- ggplot(
+          L,
+          aes_string(
+            x       = xcol,
+            y       = "value",
+            color   = "scenario",
+            linetype = "scenario",
+            group   = "scenario"
+          )
+        ) +
+          geom_line() +
+          geom_point(size = 0.6) +
+          facet_grid(n1 ~ n, scales = "free_y") +
+          labs(
+            x      = "Year",
+            y      = label_of(input$sym),
+            title  = paste("Bilateral trade (macro regions & sector groups) — Levels", sect_lab),
+            color  = "Scenario",
+            linetype = "Scenario"
+          ) +
+          theme_minimal(base_size = 11) +
+          theme(
+            legend.position = "bottom",
+            panel.border     = element_rect(color = "black", fill = NA, linewidth = 0.4),
+            panel.background = element_rect(fill = "grey97", color = NA)
+          )
+        
+        return(p)
+      }
+    }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     # ---- SPECIAL: OUT_COMP6_SHARE_REAL_t — Δ-share scatter (baseline vs ONE policy)
     if (input$sym == "OUT_COMP6_SHARE_REAL_t" && length(pols_cfg) >= 1) {
